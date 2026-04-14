@@ -229,13 +229,34 @@ def process_icon_for_button(idx, custom_img=None):
         btn["has_icon"] = False
 
 def send_icon_to_esp32(idx, b64_data, pixel_size):
-    """Send icon data to ESP32 via serial."""
+    """Send icon data to ESP32 via serial, in chunks for Windows compatibility."""
     with ser_lock:
         if ser and ser.is_open:
             cmd = f"ICON:{idx}:{pixel_size}:{b64_data}\n"
-            ser.write(cmd.encode())
-            ser.flush()
-            time.sleep(0.15)
+            encoded = cmd.encode()
+            print(f"[Icon] Enviando {len(encoded)} bytes por serial...")
+
+            # Send in chunks to avoid Windows serial buffer issues
+            CHUNK = 1024
+            for i in range(0, len(encoded), CHUNK):
+                ser.write(encoded[i:i+CHUNK])
+                ser.flush()
+                if len(encoded) > CHUNK:
+                    time.sleep(0.02)  # Small delay between chunks
+
+            # Wait for ESP32 response
+            time.sleep(0.3)
+            response = ""
+            while ser.in_waiting:
+                response += ser.read(ser.in_waiting).decode("utf-8", errors="ignore")
+                time.sleep(0.05)
+            response = response.strip()
+            if response:
+                print(f"[Icon] Respuesta ESP32: {response}")
+            if "ERR" in response:
+                print(f"[Icon] ERROR del ESP32: {response}")
+            elif "OK" not in response:
+                print(f"[Icon] Sin respuesta del ESP32 (puede que no haya recibido los datos)")
 
 def send_no_icon(idx):
     with ser_lock:

@@ -283,54 +283,105 @@ void drawWaitingDots() {
 }
 
 // ─── Serial ───
-String serialBuffer = "";
-void processSerialCommand(String cmd) {
-  cmd.trim(); lastSerialTime=millis();
-  if(cmd=="PING"){if(!pcConnected){pcConnected=true; if(!setupShown) drawSidebar();} Serial.println("PONG"); return;}
-  if(cmd.startsWith("SET:")){
-    int p1=4,p2=cmd.indexOf(':',p1); if(p2<0)return;
-    int p3=cmd.indexOf(':',p2+1); if(p3<0)return;
-    int idx=cmd.substring(p1,p2).toInt(); if(idx<0||idx>=NUM_BUTTONS)return;
-    strncpy(buttons[idx].label,cmd.substring(p2+1,p3).c_str(),19); buttons[idx].label[19]='\0';
-    String rest=cmd.substring(p3+1);
-    int c1=rest.indexOf(','),c2=rest.indexOf(',',c1+1); if(c1<0||c2<0)return;
-    int nc=rest.indexOf(':',c2+1);
-    String cp=(nc>=0)?rest.substring(0,nc):rest;
-    c1=cp.indexOf(','); c2=cp.indexOf(',',c1+1);
-    buttons[idx].r=cp.substring(0,c1).toInt(); buttons[idx].g=cp.substring(c1+1,c2).toInt(); buttons[idx].b=cp.substring(c2+1).toInt();
-    if(nc>=0){String ss=rest.substring(nc+1); int s1=ss.indexOf(','),s2=ss.indexOf(',',s1+1);
-      if(s1>=0&&s2>=0){buttons[idx].iconSizeIdx=constrain(ss.substring(0,s1).toInt(),0,3);
-        buttons[idx].borderStyle=constrain(ss.substring(s1+1,s2).toInt(),0,3);
-        buttons[idx].showLabel=ss.substring(s2+1).toInt()!=0;}}
+// Use pre-allocated buffer for large icon transfers (up to 12KB)
+static char cmdBuf[14000];
+static int cmdLen = 0;
+// Helper: find char in buffer from offset
+int bufFind(char ch, int from) {
+  for(int i=from; i<cmdLen; i++) if(cmdBuf[i]==ch) return i;
+  return -1;
+}
+// Helper: extract int from buffer range
+int bufInt(int from, int to) {
+  char tmp[12]; int len=min(to-from,11);
+  memcpy(tmp,cmdBuf+from,len); tmp[len]=0;
+  return atoi(tmp);
+}
+
+void processCommand() {
+  // Trim trailing whitespace
+  while(cmdLen>0 && (cmdBuf[cmdLen-1]==' '||cmdBuf[cmdLen-1]=='\t')) cmdLen--;
+  cmdBuf[cmdLen]=0;
+  lastSerialTime=millis();
+
+  if(cmdLen==0) return;
+
+  if(strcmp(cmdBuf,"PING")==0){
+    if(!pcConnected){pcConnected=true; if(!setupShown) drawSidebar();}
+    Serial.println("PONG"); return;
+  }
+
+  if(strncmp(cmdBuf,"SET:",4)==0){
+    int p2=bufFind(':',4); if(p2<0)return;
+    int p3=bufFind(':',p2+1); if(p3<0)return;
+    int idx=bufInt(4,p2); if(idx<0||idx>=NUM_BUTTONS)return;
+    // Label
+    int labelLen=min(p3-p2-1,19);
+    memcpy(buttons[idx].label, cmdBuf+p2+1, labelLen);
+    buttons[idx].label[labelLen]=0;
+    // Color: R,G,B
+    int c1=bufFind(',',p3+1); int c2=bufFind(',',c1+1);
+    if(c1<0||c2<0)return;
+    int nc=bufFind(':',c2+1); // optional style params
+    int colorEnd=(nc>=0)?nc:cmdLen;
+    buttons[idx].r=bufInt(p3+1,c1);
+    buttons[idx].g=bufInt(c1+1,c2);
+    buttons[idx].b=bufInt(c2+1,colorEnd);
+    // Style params: iconSize,borderStyle,showLabel
+    if(nc>=0){
+      int s1=bufFind(',',nc+1); int s2=bufFind(',',s1+1);
+      if(s1>=0&&s2>=0){
+        buttons[idx].iconSizeIdx=constrain(bufInt(nc+1,s1),0,3);
+        buttons[idx].borderStyle=constrain(bufInt(s1+1,s2),0,3);
+        buttons[idx].showLabel=bufInt(s2+1,cmdLen)!=0;
+      }
+    }
     saveConfig(); drawButton(idx,false); Serial.println("OK");
   }
-  else if(cmd.startsWith("ICON:")){
-    int p1=5,p2=cmd.indexOf(':',p1); if(p2<0)return;
-    int p3=cmd.indexOf(':',p2+1); if(p3<0)return;
-    int idx=cmd.substring(p1,p2).toInt(); if(idx<0||idx>=NUM_BUTTONS)return;
-    int ps=cmd.substring(p2+1,p3).toInt(); if(ps<16||ps>64)return;
+  else if(strncmp(cmdBuf,"ICON:",5)==0){
+    int p2=bufFind(':',5); if(p2<0)return;
+    int p3=bufFind(':',p2+1); if(p3<0)return;
+    int idx=bufInt(5,p2); if(idx<0||idx>=NUM_BUTTONS)return;
+    int ps=bufInt(p2+1,p3); if(ps<16||ps>64)return;
     int eb=ps*ps*2;
+    Serial.printf("ICON_RX:%d:%d:%d\n", idx, ps, cmdLen-p3-1);
     if(iconData[idx])free(iconData[idx]);
-    iconData[idx]=(uint16_t*)ps_malloc(eb); if(!iconData[idx]){Serial.println("ERR:NOMEM");return;}
-    int d=base64_decode(cmd.substring(p3+1).c_str(),cmd.length()-p3-1,(uint8_t*)iconData[idx],eb);
+    iconData[idx]=(uint16_t*)ps_malloc(eb);
+    if(!iconData[idx]){Serial.println("ERR:NOMEM");return;}
+    int d=base64_decode(cmdBuf+p3+1, cmdLen-p3-1, (uint8_t*)iconData[idx], eb);
     if(d>=eb){hasIcon[idx]=true;iconPixelSize[idx]=ps;drawButton(idx,false);Serial.println("OK");}
     else{hasIcon[idx]=false;Serial.printf("ERR:DECODE:%d/%d\n",d,eb);}
   }
-  else if(cmd.startsWith("NOICON:")){int idx=cmd.substring(7).toInt();
-    if(idx>=0&&idx<NUM_BUTTONS){hasIcon[idx]=false;drawButton(idx,false);Serial.println("OK");}}
-  else if(cmd=="GETALL"){for(int i=0;i<NUM_BUTTONS;i++)
-    Serial.printf("CFG:%d:%s:%d,%d,%d:%d:%d,%d,%d\n",i,buttons[i].label,buttons[i].r,buttons[i].g,buttons[i].b,
-      hasIcon[i]?1:0,buttons[i].iconSizeIdx,buttons[i].borderStyle,buttons[i].showLabel?1:0);
-    Serial.println("END");}
-  else if(cmd=="RESETALL"){for(int i=0;i<NUM_BUTTONS;i++){
-    strncpy(buttons[i].label,defaultLabels[i],19);
-    buttons[i].r=defaultColors[i][0];buttons[i].g=defaultColors[i][1];buttons[i].b=defaultColors[i][2];
-    buttons[i].iconSizeIdx=1;buttons[i].borderStyle=0;buttons[i].showLabel=true;hasIcon[i]=false;}
-    saveConfig();drawAll();Serial.println("OK");}
+  else if(strncmp(cmdBuf,"NOICON:",7)==0){
+    int idx=atoi(cmdBuf+7);
+    if(idx>=0&&idx<NUM_BUTTONS){hasIcon[idx]=false;drawButton(idx,false);Serial.println("OK");}
+  }
+  else if(strcmp(cmdBuf,"GETALL")==0){
+    for(int i=0;i<NUM_BUTTONS;i++)
+      Serial.printf("CFG:%d:%s:%d,%d,%d:%d:%d,%d,%d\n",i,buttons[i].label,buttons[i].r,buttons[i].g,buttons[i].b,
+        hasIcon[i]?1:0,buttons[i].iconSizeIdx,buttons[i].borderStyle,buttons[i].showLabel?1:0);
+    Serial.println("END");
+  }
+  else if(strcmp(cmdBuf,"RESETALL")==0){
+    for(int i=0;i<NUM_BUTTONS;i++){
+      strncpy(buttons[i].label,defaultLabels[i],19);
+      buttons[i].r=defaultColors[i][0];buttons[i].g=defaultColors[i][1];buttons[i].b=defaultColors[i][2];
+      buttons[i].iconSizeIdx=1;buttons[i].borderStyle=0;buttons[i].showLabel=true;hasIcon[i]=false;}
+    saveConfig();drawAll();Serial.println("OK");
+  }
 }
-void handleSerial(){while(Serial.available()){char c=Serial.read();
-  if(c=='\n'){processSerialCommand(serialBuffer);serialBuffer="";}
-  else if(c!='\r')serialBuffer+=c;}}
+
+void handleSerial(){
+  while(Serial.available()){
+    char c=Serial.read();
+    if(c=='\n'){
+      processCommand();
+      cmdLen=0;
+    } else if(c!='\r' && cmdLen<(int)sizeof(cmdBuf)-1){
+      cmdBuf[cmdLen++]=c;
+    }
+  }
+}
 
 // ─── Main ───
 void setup() {

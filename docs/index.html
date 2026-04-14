@@ -52,7 +52,25 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
 .btn-save{background:#667eea;color:#fff}.btn-cancel{background:#2a2a3e;color:#aaa}.btn-clear{background:#dc2626;color:#fff}
 .help{font-size:10px;color:#555;margin-top:4px}
 .warn{background:#2a2000;border:1px solid #665500;border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px;color:#ffcc00;text-align:center}
-.log{max-width:640px;width:100%;background:#0a0a15;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;color:#666;max-height:100px;overflow-y:auto;margin-top:10px}
+.ble-panel{max-width:640px;width:100%;background:#16213e;border-radius:12px;padding:16px;margin-bottom:16px}
+.ble-status{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.ble-dot{width:12px;height:12px;border-radius:50%;display:inline-block}
+.ble-dot.ok{background:#4ade80;box-shadow:0 0 8px #4ade80}
+.ble-dot.wait{background:#f59e0b;animation:pulse 1.5s infinite}
+.ble-dot.off{background:#666}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.ble-help{margin-top:10px}
+.ble-help p{font-size:13px;color:#ccc;margin-bottom:8px}
+.ble-steps{margin:12px 0}
+.ble-step{display:flex;align-items:center;gap:10px;padding:8px 0;font-size:13px;color:#bbb}
+.sn{background:#667eea;color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0}
+.ble-open-btn{padding:10px 20px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px}
+.ble-open-btn:hover{background:#2563eb}
+.ble-ok{display:flex;align-items:center;gap:12px;margin-top:8px}
+.ble-test-btn{padding:8px 16px;border-radius:8px;border:none;background:#0d3320;color:#4ade80;font-size:13px;font-weight:600;cursor:pointer}
+.ble-test-btn:hover{background:#15462b}
+.ble-test-msg{font-size:12px;color:#888}
+.log{max-width:640px;width:100%;background:#0a0a15;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;color:#666;max-height:80px;overflow-y:auto;margin-top:10px}
 </style></head><body>
 
 <h1>Stream Deck Config</h1>
@@ -63,6 +81,27 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
 <div class="connect-bar">
   <button class="connect-btn" id="connectBtn" onclick="connectUSB()">Conectar USB</button>
   <span class="badge off" id="badge">Desconectado</span>
+</div>
+
+<div id="blePanel" class="ble-panel" style="display:none">
+  <div class="ble-status">
+    <span class="ble-dot" id="bleDot"></span>
+    <span id="bleText">Bluetooth: comprobando...</span>
+  </div>
+  <div id="bleHelp" class="ble-help" style="display:none">
+    <p><b>El Stream Deck necesita Bluetooth para funcionar.</b></p>
+    <p>Empareja "StreamDeck" en los ajustes de Bluetooth de tu PC:</p>
+    <div class="ble-steps">
+      <div class="ble-step"><span class="sn">1</span> Abre <b>Ajustes Bluetooth</b> de tu PC</div>
+      <div class="ble-step"><span class="sn">2</span> Busca <b>"StreamDeck"</b> en dispositivos</div>
+      <div class="ble-step"><span class="sn">3</span> Pulsa <b>Emparejar / Conectar</b></div>
+    </div>
+    <button class="ble-open-btn" onclick="openBTSettings()">Abrir Ajustes Bluetooth</button>
+  </div>
+  <div id="bleOk" class="ble-ok" style="display:none">
+    <button class="ble-test-btn" onclick="testBLE()">Probar teclado BLE</button>
+    <span class="ble-test-msg" id="bleTestMsg"></span>
+  </div>
 </div>
 
 <div class="grid" id="grid"></div>
@@ -140,9 +179,11 @@ async function connectUSB(){
     // Start reading in background
     readLoop();
 
-    // Load config
+    // Load config and check BLE
     await new Promise(r=>setTimeout(r,500));
     await loadButtons();
+    await checkBLE();
+    setInterval(checkBLE, 5000);
   }catch(e){log('Error: '+e.message);alert('Error conectando: '+e.message);}
 }
 
@@ -281,6 +322,56 @@ async function saveBtn(){
   B[i]={l:label,r:c[0],g:c[1],b:c[2],a:action,y:actionType,z:iconSize,d:borderStyle,t:showLabel};
   render();closeModal();
   log('Boton '+(i+1)+' guardado');}
+
+// ─── BLE Status ───
+async function checkBLE(){
+  if(!writer)return;
+  const resp=await sendAndWait('STATUS','END',1500);
+  const connected=resp.includes('CONNECTED');
+  const dot=document.getElementById('bleDot');
+  const txt=document.getElementById('bleText');
+  const help=document.getElementById('bleHelp');
+  const ok=document.getElementById('bleOk');
+  document.getElementById('blePanel').style.display='';
+
+  if(connected){
+    dot.className='ble-dot ok';
+    txt.textContent='Bluetooth: conectado - los botones funcionan';
+    txt.style.color='#4ade80';
+    help.style.display='none';
+    ok.style.display='';
+  }else{
+    dot.className='ble-dot wait';
+    txt.textContent='Bluetooth: esperando emparejamiento...';
+    txt.style.color='#f59e0b';
+    help.style.display='';
+    ok.style.display='none';
+  }
+}
+
+function openBTSettings(){
+  // Try to open Bluetooth settings
+  const ua=navigator.userAgent.toLowerCase();
+  if(ua.includes('win')) window.open('ms-settings:bluetooth','_blank');
+  else if(ua.includes('mac')) window.open('x-apple.systempreferences:com.apple.BluetoothSettings','_blank');
+  else alert('Abre Ajustes > Bluetooth en tu dispositivo');
+}
+
+async function testBLE(){
+  const msg=document.getElementById('bleTestMsg');
+  msg.textContent='Enviando...';
+  const resp=await sendAndWait('TESTBLE','SENT',2000);
+  if(resp.includes('SENT')){
+    msg.textContent='Enviado! Mira si aparecio "StreamDeck OK!" donde tengas el cursor';
+    msg.style.color='#4ade80';
+  }else if(resp.includes('NOBLE')){
+    msg.textContent='BLE no conectado. Empareja primero.';
+    msg.style.color='#f87171';
+  }else{
+    msg.textContent='Sin respuesta';
+    msg.style.color='#f87171';
+  }
+}
 
 async function clearBtn(){
   const i=eI;

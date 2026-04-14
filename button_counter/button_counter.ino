@@ -557,6 +557,24 @@ void processSerialCmd(const String &cmd) {
     return;
   }
 
+  // STATUS - return BLE state
+  if(cmd == "STATUS") {
+    Serial.printf("BLE:%s\n", bleKb.isConnected()?"CONNECTED":"WAITING");
+    Serial.println("END");
+    return;
+  }
+
+  // TESTBLE - type "test" to verify BLE works
+  if(cmd == "TESTBLE") {
+    if(bleKb.isConnected()){
+      bleKb.print("StreamDeck OK!");
+      Serial.println("SENT");
+    } else {
+      Serial.println("NOBLE");
+    }
+    return;
+  }
+
   // PING
   if(cmd == "PING") { Serial.println("PONG"); return; }
 }

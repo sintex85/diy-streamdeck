@@ -81,21 +81,48 @@ def rgb_to_rgb565(r, g, b):
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
 
 def fetch_favicon(url):
-    """Download favicon for a URL and return as 32x32 PIL Image."""
+    """Download favicon for a URL and return as PIL Image."""
     if not HAS_PIL:
+        print("[Icon] Pillow no instalado, no se pueden procesar iconos")
         return None
     try:
         domain = urllib.parse.urlparse(url).netloc
         if not domain:
             domain = url.replace("https://","").replace("http://","").split("/")[0]
-        favicon_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=64"
-        req = urllib.request.Request(favicon_url, headers={"User-Agent": "Mozilla/5.0"})
-        resp = urllib.request.urlopen(req, timeout=5)
-        img = Image.open(io.BytesIO(resp.read())).convert("RGBA")
-        img = img.resize((ICON_SIZE, ICON_SIZE), Image.LANCZOS)
-        return img
+        if not domain:
+            print(f"[Icon] No se pudo extraer dominio de: {url}")
+            return None
+
+        # Try multiple favicon sources
+        sources = [
+            f"https://www.google.com/s2/favicons?domain={domain}&sz=64",
+            f"https://favicone.com/{domain}?s=64",
+            f"https://{domain}/favicon.ico",
+        ]
+
+        for favicon_url in sources:
+            try:
+                print(f"[Icon] Descargando: {favicon_url}")
+                import ssl
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                req = urllib.request.Request(favicon_url, headers={"User-Agent": "Mozilla/5.0"})
+                resp = urllib.request.urlopen(req, timeout=8, context=ctx)
+                data = resp.read()
+                if len(data) < 100:  # Too small, probably an error
+                    continue
+                img = Image.open(io.BytesIO(data)).convert("RGBA")
+                print(f"[Icon] OK - {img.size[0]}x{img.size[1]}")
+                return img
+            except Exception as e:
+                print(f"[Icon] Fallo {favicon_url}: {e}")
+                continue
+
+        print(f"[Icon] No se pudo obtener favicon para {domain}")
+        return None
     except Exception as e:
-        print(f"[Icon] Error descargando favicon: {e}")
+        print(f"[Icon] Error general: {e}")
         return None
 
 def get_app_icon(app_name):
@@ -1116,19 +1143,26 @@ class DeckHandler(http.server.BaseHTTPRequestHandler):
             sync_button_to_esp32(idx)
 
             icon_sent = False
-            # Check for custom uploaded icon (base64 PNG)
-            custom_icon_b64 = body.get("custom_icon")
-            if custom_icon_b64 and HAS_PIL:
-                img_data = base64.b64decode(custom_icon_b64)
-                img = Image.open(io.BytesIO(img_data)).convert("RGBA")
-                process_icon_for_button(idx, custom_img=img)
-                icon_sent = config[idx].get("has_icon", False)
-            elif config[idx]["action"] and config[idx]["action_type"] in ("url", "app"):
-                process_icon_for_button(idx)
-                icon_sent = config[idx].get("has_icon", False)
-            else:
-                send_no_icon(idx)
-                config[idx]["has_icon"] = False
+            try:
+                custom_icon_b64 = body.get("custom_icon")
+                if custom_icon_b64 and HAS_PIL:
+                    print(f"[Icon] Boton {idx+1}: procesando icono subido ({len(custom_icon_b64)} chars)")
+                    img_data = base64.b64decode(custom_icon_b64)
+                    img = Image.open(io.BytesIO(img_data)).convert("RGBA")
+                    print(f"[Icon] Imagen decodificada: {img.size}")
+                    process_icon_for_button(idx, custom_img=img)
+                    icon_sent = config[idx].get("has_icon", False)
+                elif config[idx]["action"] and config[idx]["action_type"] in ("url", "app"):
+                    print(f"[Icon] Boton {idx+1}: buscando icono para {config[idx]['action_type']} '{config[idx]['action']}'")
+                    process_icon_for_button(idx)
+                    icon_sent = config[idx].get("has_icon", False)
+                else:
+                    send_no_icon(idx)
+                    config[idx]["has_icon"] = False
+            except Exception as e:
+                print(f"[Icon] ERROR procesando icono boton {idx+1}: {e}")
+                import traceback
+                traceback.print_exc()
 
             save_config()
             self._send_json({"ok": True, "icon_sent": icon_sent})

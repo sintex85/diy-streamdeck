@@ -27,5 +27,15 @@ echo.
 echo   Para cerrar: cierra esta ventana.
 echo.
 
-python streamdeck_app.py 2>nul || python3 streamdeck_app.py
+echo   Iniciando...
+echo.
+python streamdeck_app.py
+if %errorlevel% neq 0 (
+    echo.
+    echo   ── Error. Comprueba que:
+    echo   1. Python esta instalado y en el PATH
+    echo   2. Ejecutaste 'Instalar.bat' primero
+    echo   3. El ESP32 esta conectado por USB
+    echo.
+)
 pause

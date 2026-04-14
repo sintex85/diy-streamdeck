@@ -10,5 +10,3 @@ build/
 node_modules/
 .pio/
 .vscode/
-i2c_scan/
-streamdeck_listener.py

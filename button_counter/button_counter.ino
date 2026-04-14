@@ -53,6 +53,7 @@ int activeButton = -1;
 bool locked = false;
 uint8_t brightness = 255;
 int activeSidebar = -1;
+bool configMode = false;  // true = BLE config mode (keyboard paused)
 
 // Defaults
 static const char* defaultLabels[] = {"1","2","3","4","5","6","7","8","9","10","11","12"};
@@ -211,9 +212,15 @@ void drawSidebar() {
   lcd.drawString(conn?"BT OK":"BT...",cx,y+42); y+=SB_ITEM_H;
   lcd.drawFastHLine(SB_X+8,y,SIDEBAR_W-16,lcd.color565(40,40,50));
 
-  // Config (via BLE)
-  drawGearIcon(cx,y+28,lcd.color565(180,180,200));
-  lcd.setTextColor(lcd.color565(120,120,130));lcd.drawString("Config",cx,y+48); y+=SB_ITEM_H;
+  // Config mode toggle
+  if(configMode){
+    drawGearIcon(cx,y+28,lcd.color565(255,200,50));
+    lcd.setTextColor(lcd.color565(255,200,50));lcd.drawString("CONFIG",cx,y+48);
+  } else {
+    drawGearIcon(cx,y+28,lcd.color565(180,180,200));
+    lcd.setTextColor(lcd.color565(120,120,130));lcd.drawString("Config",cx,y+48);
+  }
+  y+=SB_ITEM_H;
   lcd.drawFastHLine(SB_X+8,y,SIDEBAR_W-16,lcd.color565(40,40,50));
 
   drawSunIcon(cx,y+25,lcd.color565(255,220,50),true);lcd.drawString("Brillo+",cx,y+46); y+=SB_ITEM_H;
@@ -226,12 +233,21 @@ void drawSidebar() {
   lcd.drawString(locked?"Bloq":"Libre",cx,y+46); y+=SB_ITEM_H;
   lcd.drawFastHLine(SB_X+8,y,SIDEBAR_W-16,lcd.color565(40,40,50));
 
-  // Config URL
-  lcd.setTextColor(lcd.color565(100,126,234));
-  lcd.drawString("Config:",cx,y+15);
-  lcd.setTextColor(lcd.color565(80,80,100));
-  lcd.drawString("Chrome",cx,y+30);
-  lcd.drawString("BLE",cx,y+43);
+  // Mode info
+  if(configMode){
+    lcd.setTextColor(lcd.color565(255,200,50));
+    lcd.drawString("ABRE",cx,y+12);
+    lcd.drawString("CHROME",cx,y+25);
+    lcd.setTextColor(lcd.color565(100,126,234));
+    lcd.drawString("Pulsa",cx,y+42);
+    lcd.drawString("Config",cx,y+54);
+    lcd.drawString("p/salir",cx,y+64);
+  } else {
+    lcd.setTextColor(lcd.color565(80,80,100));
+    lcd.drawString("Pulsa",cx,y+20);
+    lcd.drawString("Config",cx,y+33);
+    lcd.drawString("p/editar",cx,y+46);
+  }
   y+=SB_ITEM_H;
 
   // Brightness bar
@@ -243,8 +259,92 @@ void drawSidebar() {
 }
 
 int sidebarHitTest(int32_t tx,int32_t ty){if(tx<SB_X)return -1;return ty/SB_ITEM_H;}
+// ─── BLE Config (must be before toggleConfigMode) ───
+String bleWriteBuffer = "";
+
+class ConfigWriteCallback : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pChar) {
+    std::string val = pChar->getValue();
+    String chunk = String(val.c_str());
+    if(chunk.indexOf('\n') >= 0) {
+      bleWriteBuffer += chunk.substring(0, chunk.indexOf('\n'));
+      bleWriteBuffer.trim();
+      Serial.printf("[BLE] Cmd: %s (%d chars)\n", bleWriteBuffer.substring(0,40).c_str(), bleWriteBuffer.length());
+      processBLECommand(bleWriteBuffer);
+      bleWriteBuffer = "";
+    } else {
+      bleWriteBuffer += chunk;
+    }
+  }
+};
+
+void setupBLEConfig() {
+  BLEServer *pServer = BLEDevice::createServer();
+  if(!pServer) { Serial.println("[BLE] ERROR: no server"); return; }
+  BLEService *pService = pServer->createService(BLEUUID(CONFIG_SERVICE_UUID), 20);
+  pConfigWrite = pService->createCharacteristic(CONFIG_CHAR_WRITE_UUID,
+    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  pConfigWrite->setCallbacks(new ConfigWriteCallback());
+  pConfigRead = pService->createCharacteristic(CONFIG_CHAR_READ_UUID,
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  pConfigRead->addDescriptor(new BLE2902());
+  pService->start();
+  bleConfigReady = true;
+  Serial.println("[BLE] Config service ready");
+}
+
+void toggleConfigMode() {
+  configMode = !configMode;
+  if(configMode) {
+    // Stop keyboard, restart BLE with only config service
+    Serial.println("[BLE] Entering CONFIG mode...");
+    bleKb.end();
+    delay(300);
+    BLEDevice::deinit(true);
+    delay(300);
+
+    // Restart BLE with config service only (no HID)
+    BLEDevice::init("StreamDeck");
+    BLEServer *pServer = BLEDevice::createServer();
+    BLEService *pService = pServer->createService(BLEUUID(CONFIG_SERVICE_UUID), 20);
+
+    pConfigWrite = pService->createCharacteristic(CONFIG_CHAR_WRITE_UUID,
+      BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+    pConfigWrite->setCallbacks(new ConfigWriteCallback());
+
+    pConfigRead = pService->createCharacteristic(CONFIG_CHAR_READ_UUID,
+      BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+    pConfigRead->addDescriptor(new BLE2902());
+
+    pService->start();
+
+    BLEAdvertising *pAdv = BLEDevice::getAdvertising();
+    pAdv->addServiceUUID(CONFIG_SERVICE_UUID);
+    pAdv->setScanResponse(true);
+    BLEDevice::startAdvertising();
+    Serial.println("[BLE] CONFIG mode ready - connect from Chrome");
+  } else {
+    // Stop config, restart keyboard
+    Serial.println("[BLE] Exiting CONFIG mode...");
+    BLEDevice::deinit(true);
+    delay(300);
+
+    bleKb.begin();
+    delay(500);
+    setupBLEConfig();
+    delay(100);
+    BLEAdvertising *pAdv = BLEDevice::getAdvertising();
+    pAdv->addServiceUUID(CONFIG_SERVICE_UUID);
+    pAdv->setScanResponse(true);
+    BLEDevice::startAdvertising();
+    Serial.println("[BLE] KEYBOARD mode ready");
+  }
+  drawSidebar();
+}
+
 void handleSidebarTouch(int item){
   switch(item){
+    case 1: toggleConfigMode(); break;
     case 2:brightness=min(255,brightness+30);lcd.setBrightness(brightness);saveConfig();drawSidebar();break;
     case 3:brightness=max(25,brightness-30);lcd.setBrightness(brightness);saveConfig();drawSidebar();break;
     case 4:locked=!locked;drawSidebar();break;
@@ -363,52 +463,7 @@ void processBLECommand(const String &cmd) {
   }
 }
 
-// BLE write buffer for multi-packet commands
-String bleWriteBuffer = "";
-
-class ConfigWriteCallback : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *pChar) {
-    std::string val = pChar->getValue();
-    String chunk = String(val.c_str());
-
-    // Check if this is end of command (newline terminated)
-    if(chunk.indexOf('\n') >= 0) {
-      bleWriteBuffer += chunk.substring(0, chunk.indexOf('\n'));
-      bleWriteBuffer.trim();
-      Serial.printf("[BLE] Cmd: %s (%d chars)\n", bleWriteBuffer.substring(0,40).c_str(), bleWriteBuffer.length());
-      processBLECommand(bleWriteBuffer);
-      bleWriteBuffer = "";
-    } else {
-      bleWriteBuffer += chunk;
-    }
-  }
-};
-
-void setupBLEConfig() {
-  // Get the BLE server created by BleKeyboard
-  BLEServer *pServer = BLEDevice::createServer();
-
-  // Create config service
-  BLEService *pService = pServer->createService(CONFIG_SERVICE_UUID);
-
-  // Write characteristic (receive commands from browser)
-  pConfigWrite = pService->createCharacteristic(
-    CONFIG_CHAR_WRITE_UUID,
-    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
-  );
-  pConfigWrite->setCallbacks(new ConfigWriteCallback());
-
-  // Read/Notify characteristic (send responses to browser)
-  pConfigRead = pService->createCharacteristic(
-    CONFIG_CHAR_READ_UUID,
-    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
-  );
-  pConfigRead->addDescriptor(new BLE2902());
-
-  pService->start();
-  bleConfigReady = true;
-  Serial.println("[BLE] Config service ready");
-}
+// (BLE Config classes moved above toggleConfigMode)
 
 // ─── Main ───
 void setup() {
@@ -429,13 +484,16 @@ void setup() {
   bleKb.begin();
 
   // Add config service on top of HID
-  delay(200);
+  delay(500);
   setupBLEConfig();
 
-  // Update advertising to include config service
+  // Re-advertise with config service included
+  delay(100);
   BLEAdvertising *pAdv = BLEDevice::getAdvertising();
   pAdv->addServiceUUID(CONFIG_SERVICE_UUID);
-  pAdv->start();
+  pAdv->setScanResponse(true);
+  pAdv->setMinPreferred(0x06);
+  BLEDevice::startAdvertising();
 
   Serial.println("[BOOT] Ready! Pair 'StreamDeck' via Bluetooth");
 }

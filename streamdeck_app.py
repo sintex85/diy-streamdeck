@@ -27,8 +27,15 @@ IS_MAC = platform.system() == "Darwin"
 
 PORT_WEB = 1313
 BAUD = 115200
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "streamdeck_config.json")
-ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
+
+# When running as PyInstaller exe, use the exe's directory for config/icons
+if getattr(sys, 'frozen', False):
+    APP_BASE = os.path.dirname(sys.executable)
+else:
+    APP_BASE = os.path.dirname(os.path.abspath(__file__))
+
+CONFIG_FILE = os.path.join(APP_BASE, "streamdeck_config.json")
+ICON_DIR = os.path.join(APP_BASE, "icons")
 ICON_SIZE = 32
 
 NUM_BUTTONS = 12
@@ -1191,7 +1198,7 @@ class DeckHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(404)
 
 # ─── Auto-start setup ───
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+APP_DIR = APP_BASE
 PLIST_NAME = "com.diy.streamdeck"
 PLIST_PATH = os.path.expanduser(f"~/Library/LaunchAgents/{PLIST_NAME}.plist")
 WIN_STARTUP = os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
@@ -1199,10 +1206,25 @@ WIN_VBS_PATH = os.path.join(WIN_STARTUP, "StreamDeck.vbs") if IS_WINDOWS else ""
 
 def install_autostart():
     """Install auto-start so the app runs at login."""
+    if getattr(sys, 'frozen', False):
+        exe_path = sys.executable
+    else:
+        exe_path = None
+
     python_path = sys.executable
     script_path = os.path.abspath(__file__)
 
     if IS_MAC:
+        if exe_path and 'StreamDeck' in exe_path:
+            # Running as compiled .app
+            prog_args = f"""<string>{exe_path}</string>
+        <string>--daemon</string>"""
+        else:
+            # Running as Python script
+            prog_args = f"""<string>{python_path}</string>
+        <string>{script_path}</string>
+        <string>--daemon</string>"""
+
         plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -1211,9 +1233,7 @@ def install_autostart():
     <string>{PLIST_NAME}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{python_path}</string>
-        <string>{script_path}</string>
-        <string>--daemon</string>
+        {prog_args}
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -1236,14 +1256,17 @@ def install_autostart():
         print(f"  Para desinstalar: python3 streamdeck_app.py --uninstall")
 
     elif IS_WINDOWS:
+        if exe_path and exe_path.endswith('.exe'):
+            run_cmd = f'"""{exe_path}"" --daemon"'
+        else:
+            run_cmd = f'"""{python_path}"" ""{script_path}"" --daemon"'
         vbs = f'Set ws = CreateObject("Wscript.Shell")\n'
-        vbs += f'ws.Run """{python_path}"" ""{script_path}"" --daemon", 0, False\n'
+        vbs += f'ws.Run {run_cmd}, 0, False\n'
         os.makedirs(WIN_STARTUP, exist_ok=True)
         with open(WIN_VBS_PATH, "w") as f:
             f.write(vbs)
         print(f"  Auto-arranque instalado (Windows Startup)")
         print(f"  El Stream Deck se abrira solo al conectar el USB.")
-        print(f"  Para desinstalar: python streamdeck_app.py --uninstall")
 
     else:
         print("  Auto-arranque no soportado en este OS.")

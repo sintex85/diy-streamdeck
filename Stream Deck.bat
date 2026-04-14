@@ -7,6 +7,32 @@ echo        DIY Stream Deck
 echo   ===================================
 echo.
 
+:: Check if running from inside a ZIP (temp folder)
+echo "%~dp0" | findstr /i "Temp" >nul 2>&1
+if %errorlevel% equ 0 (
+    if not exist "%~dp0streamdeck_app.py" (
+        echo   [X] Estas ejecutando desde dentro del ZIP!
+        echo.
+        echo   1. Haz click derecho en el archivo .zip
+        echo   2. Selecciona "Extraer todo..."
+        echo   3. Abre la carpeta extraida
+        echo   4. Ejecuta "Stream Deck.bat" desde ahi
+        echo.
+        pause
+        exit /b 1
+    )
+)
+
+:: Check streamdeck_app.py exists next to this bat
+if not exist "%~dp0streamdeck_app.py" (
+    echo   [X] No se encuentra streamdeck_app.py
+    echo   Asegurate de que todos los archivos estan
+    echo   en la misma carpeta.
+    echo.
+    pause
+    exit /b 1
+)
+
 :: Check Python is real (not Windows Store alias)
 python -c "import sys; sys.exit(0)" >nul 2>&1
 if %errorlevel% neq 0 (

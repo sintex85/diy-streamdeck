@@ -7,6 +7,19 @@ echo     DIY Stream Deck - Instalador
 echo   ===================================
 echo.
 
+:: Check if running from inside a ZIP
+if not exist "%~dp0streamdeck_app.py" (
+    echo   [X] Estas ejecutando desde dentro del ZIP!
+    echo.
+    echo   1. Haz click derecho en el archivo .zip
+    echo   2. Selecciona "Extraer todo..."
+    echo   3. Abre la carpeta extraida
+    echo   4. Ejecuta "Instalar.bat" desde ahi
+    echo.
+    pause
+    exit /b 1
+)
+
 :: Check Python (avoid Windows Store alias)
 where python >nul 2>&1
 if %errorlevel% neq 0 goto nopython

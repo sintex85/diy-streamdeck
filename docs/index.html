@@ -166,14 +166,14 @@ async function send(cmd){
   await writer.write(cmd+'\n');
 }
 
-async function sendAndWait(cmd, timeout=2000){
+async function sendAndWait(cmd, endMarker='OK', timeout=3000){
   readBuf='';
   await send(cmd);
   const start=Date.now();
   while(Date.now()-start<timeout){
     await new Promise(r=>setTimeout(r,50));
-    if(readBuf.includes('\n')){
-      await new Promise(r=>setTimeout(r,100)); // wait for remaining data
+    if(readBuf.includes(endMarker) || readBuf.includes('END') || readBuf.includes('ERR')){
+      await new Promise(r=>setTimeout(r,150));
       break;
     }
   }
@@ -184,27 +184,38 @@ async function sendAndWait(cmd, timeout=2000){
 
 async function loadButtons(){
   log('Cargando config...');
-  const resp = await sendAndWait('GETALL', 3000);
-  log('Respuesta: '+resp.substring(0,80)+'...');
+  const resp = await sendAndWait('GETALL', 'END', 4000);
+  log('Recibido '+resp.length+' chars');
   try{
-    // Parse CFG:N:label:R,G,B:hasIcon:iconSize,border,showLabel lines
+    // Format: CFG:idx:label:R,G,B:hasIcon:sz,brd,lbl:actType:action
     const lines = resp.split('\n').filter(l=>l.startsWith('CFG:'));
     B=[];
     for(const line of lines){
-      const parts=line.split(':');
-      if(parts.length<4)continue;
-      const i=parseInt(parts[1]);
-      const label=parts[2];
-      const colors=parts[3].split(',');
-      const hasIcon=parts[4]||'0';
-      const style=(parts[5]||'1,0,1').split(',');
-      B[i]={l:label,r:parseInt(colors[0]),g:parseInt(colors[1]),b:parseInt(colors[2]),
-        a:'',y:0,z:parseInt(style[0]||1),d:parseInt(style[1]||0),t:parseInt(style[2]||1)};
+      // Split only first 7 colons (action may contain colons like https://)
+      const p=[];
+      let start=0;
+      for(let c=0;c<7;c++){
+        const idx=line.indexOf(':',start);
+        if(idx<0)break;
+        p.push(line.substring(start,idx));
+        start=idx+1;
+      }
+      p.push(line.substring(start)); // rest is action (may contain colons)
+
+      if(p.length<7)continue;
+      // p[0]=CFG, p[1]=idx, p[2]=label, p[3]=R,G,B, p[4]=hasIcon, p[5]=sz,brd,lbl, p[6]=actType, p[7]=action
+      const i=parseInt(p[1]);
+      const colors=p[3].split(',');
+      const style=p[5].split(',');
+      const actType=parseInt(p[6])||0;
+      const action=p[7]||'';
+
+      B[i]={l:p[2], r:parseInt(colors[0]),g:parseInt(colors[1]),b:parseInt(colors[2]),
+        a:action, y:actType,
+        z:parseInt(style[0]||1), d:parseInt(style[1]||0), t:parseInt(style[2]||1)};
     }
-    // Load actions from saved config on ESP32 (they're in Preferences, need separate query)
-    // For now, show what we have
     if(B.length>0){render();log('Config cargada: '+B.length+' botones');}
-    else log('No se pudo cargar la config');
+    else log('No se pudo cargar config. Respuesta: '+resp.substring(0,200));
   }catch(e){log('Error parseando: '+e.message);}
 }
 
@@ -255,26 +266,28 @@ async function saveBtn(){
   const borderStyle=+document.querySelector('input[name=bStyle]:checked').value;
   const showLabel=document.getElementById('eShowLabel').checked?1:0;
 
+  // Send visual config
   const cmd=`SET:${i}:${label}:${c[0]},${c[1]},${c[2]}:${iconSize},${borderStyle},${showLabel}`;
-  log('Enviando: '+cmd);
-  const resp = await sendAndWait(cmd, 2000);
-  log('Respuesta: '+resp);
+  log('SET: '+cmd);
+  const r1 = await sendAndWait(cmd,'OK',2000);
+  log('-> '+r1);
 
-  // Also send action config
+  // Send action config
   const actCmd=`ACT:${i}:${actionType}:${action}`;
-  log('Enviando: '+actCmd);
-  const resp2 = await sendAndWait(actCmd, 2000);
-  log('Respuesta: '+resp2);
+  log('ACT: '+actCmd);
+  const r2 = await sendAndWait(actCmd,'OK',2000);
+  log('-> '+r2);
 
   B[i]={l:label,r:c[0],g:c[1],b:c[2],a:action,y:actionType,z:iconSize,d:borderStyle,t:showLabel};
-  render();closeModal();}
+  render();closeModal();
+  log('Boton '+(i+1)+' guardado');}
 
 async function clearBtn(){
   const i=eI;
-  const cmd=`SET:${i}:${i+1}:100,100,100:1,0,1`;
-  await sendAndWait(cmd);
-  await sendAndWait(`ACT:${i}:0:`);
+  await sendAndWait(`SET:${i}:${i+1}:100,100,100:1,0,1`,'OK',2000);
+  await sendAndWait(`ACT:${i}:0:`,'OK',2000);
   B[i]={l:String(i+1),r:100,g:100,b:100,a:'',y:0,z:1,d:0,t:1};
-  render();closeModal();}
+  render();closeModal();
+  log('Boton '+(i+1)+' limpiado');}
 </script>
 </body></html>

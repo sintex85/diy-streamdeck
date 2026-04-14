@@ -495,27 +495,101 @@ void setup() {
   pAdv->setMinPreferred(0x06);
   BLEDevice::startAdvertising();
 
-  Serial.println("[BOOT] Ready! Pair 'StreamDeck' via Bluetooth");
+  Serial.println("[BOOT] Ready!");
+}
+
+// ─── Serial command processing (same protocol, via USB) ───
+String serialBuf = "";
+
+void processSerialCmd(const String &cmd) {
+  // GETALL - return all config including actions
+  if(cmd == "GETALL") {
+    for(int i=0;i<NUM_BUTTONS;i++){
+      Serial.printf("CFG:%d:%s:%d,%d,%d:%d:%d,%d,%d:%d:%s\n",i,
+        buttons[i].label, buttons[i].r,buttons[i].g,buttons[i].b,
+        hasIcon[i]?1:0,
+        buttons[i].iconSizeIdx, buttons[i].borderStyle, buttons[i].showLabel?1:0,
+        buttons[i].actionType, buttons[i].action);
+    }
+    Serial.println("END");
+    return;
+  }
+
+  // SET:N:label:R,G,B:iconSize,border,showLabel
+  if(cmd.startsWith("SET:")) {
+    int p1=4, p2=cmd.indexOf(':',p1); if(p2<0)return;
+    int p3=cmd.indexOf(':',p2+1); if(p3<0)return;
+    int idx=cmd.substring(p1,p2).toInt();
+    if(idx<0||idx>=NUM_BUTTONS)return;
+    String label=cmd.substring(p2+1,p3);
+    strncpy(buttons[idx].label,label.c_str(),19); buttons[idx].label[19]='\0';
+    String rest=cmd.substring(p3+1);
+    int c1=rest.indexOf(','),c2=rest.indexOf(',',c1+1);
+    if(c1<0||c2<0)return;
+    int nc=rest.indexOf(':',c2+1);
+    String cp=(nc>=0)?rest.substring(0,nc):rest;
+    c1=cp.indexOf(','); c2=cp.indexOf(',',c1+1);
+    buttons[idx].r=cp.substring(0,c1).toInt();
+    buttons[idx].g=cp.substring(c1+1,c2).toInt();
+    buttons[idx].b=cp.substring(c2+1).toInt();
+    if(nc>=0){String ss=rest.substring(nc+1);
+      int s1=ss.indexOf(','),s2=ss.indexOf(',',s1+1);
+      if(s1>=0&&s2>=0){
+        buttons[idx].iconSizeIdx=constrain(ss.substring(0,s1).toInt(),0,3);
+        buttons[idx].borderStyle=constrain(ss.substring(s1+1,s2).toInt(),0,3);
+        buttons[idx].showLabel=ss.substring(s2+1).toInt()!=0;}}
+    saveConfig(); drawButton(idx,false);
+    Serial.println("OK");
+    return;
+  }
+
+  // ACT:N:type:action - set action for button N
+  if(cmd.startsWith("ACT:")) {
+    int p1=4, p2=cmd.indexOf(':',p1); if(p2<0)return;
+    int p3=cmd.indexOf(':',p2+1); if(p3<0)return;
+    int idx=cmd.substring(p1,p2).toInt();
+    if(idx<0||idx>=NUM_BUTTONS)return;
+    buttons[idx].actionType=cmd.substring(p2+1,p3).toInt();
+    String action=cmd.substring(p3+1);
+    strncpy(buttons[idx].action,action.c_str(),127); buttons[idx].action[127]='\0';
+    saveConfig();
+    Serial.println("OK");
+    return;
+  }
+
+  // PING
+  if(cmd == "PING") { Serial.println("PONG"); return; }
+}
+
+void handleSerial() {
+  while(Serial.available()) {
+    char c = Serial.read();
+    if(c=='\n') {
+      serialBuf.trim();
+      if(serialBuf.length()>0) processSerialCmd(serialBuf);
+      serialBuf = "";
+    } else if(c!='\r') {
+      serialBuf += c;
+    }
+  }
 }
 
 void loop() {
-  // Send BLE responses in chunks
-  if(bleResponse.length() > 0 && pConfigRead) {
-    int mtu = 500;  // Safe BLE chunk size
-    int sent = 0;
-    while(sent < bleResponse.length()) {
-      int chunkLen = min(mtu, (int)bleResponse.length() - sent);
-      pConfigRead->setValue(bleResponse.substring(sent, sent+chunkLen).c_str());
-      pConfigRead->notify();
-      sent += chunkLen;
-      if(sent < bleResponse.length()) delay(20);
-    }
-    bleResponse = "";
-  }
+  handleSerial();
 
-  // Update BLE status
-  static bool lastBle = false;
-  bool curBle = bleKb.isConnected();
+  // BLE responses
+  if(bleResponse.length()>0 && pConfigRead){
+    int mtu=500; int sent=0;
+    while(sent<bleResponse.length()){
+      int cl=min(mtu,(int)bleResponse.length()-sent);
+      pConfigRead->setValue(bleResponse.substring(sent,sent+cl).c_str());
+      pConfigRead->notify(); sent+=cl;
+      if(sent<bleResponse.length())delay(20);}
+    bleResponse="";}
+
+  // BLE status
+  static bool lastBle=false;
+  bool curBle=bleKb.isConnected();
   if(curBle!=lastBle){lastBle=curBle;drawSidebar();}
 
   // Touch

@@ -12,8 +12,8 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
 .connect-btn:hover{background:#5a6fd6}
 .connect-btn:disabled{background:#333;color:#666;cursor:default}
 .badge{padding:4px 12px;border-radius:12px;font-size:12px}
-.bt-on{background:#1a3a5c;color:#4aa8ff}
-.bt-off{background:#3b1111;color:#f87171}
+.on{background:#0d3320;color:#4ade80}
+.off{background:#3b1111;color:#f87171}
 
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;max-width:640px;width:100%;margin-bottom:20px}
 .btn-card{aspect-ratio:1.3;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;box-shadow:0 3px 10px rgba(0,0,0,.4);border:2px solid transparent;gap:4px;position:relative}
@@ -29,7 +29,7 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
 .modal h2{margin-bottom:16px;font-size:18px}
 .field{margin-bottom:14px}
 .field label{display:block;font-size:12px;color:#aaa;margin-bottom:4px}
-.field input,.field select{width:100%;padding:8px 12px;border-radius:8px;border:1px solid #333;background:#0f1a30;color:#eee;font-size:14px;outline:none}
+.field input{width:100%;padding:8px 12px;border-radius:8px;border:1px solid #333;background:#0f1a30;color:#eee;font-size:14px;outline:none}
 .field input:focus{border-color:#667eea}
 .field input[type=color]{height:40px;padding:3px;cursor:pointer}
 .pills{display:flex;gap:4px}
@@ -51,17 +51,18 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
 .actions button{flex:1;padding:10px;border-radius:8px;border:none;font-size:14px;font-weight:600;cursor:pointer}
 .btn-save{background:#667eea;color:#fff}.btn-cancel{background:#2a2a3e;color:#aaa}.btn-clear{background:#dc2626;color:#fff}
 .help{font-size:10px;color:#555;margin-top:4px}
-.warn{background:#2a2000;border:1px solid #665500;border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px;color:#ffcc00;text-align:center;display:none}
+.warn{background:#2a2000;border:1px solid #665500;border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px;color:#ffcc00;text-align:center}
+.log{max-width:640px;width:100%;background:#0a0a15;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;color:#666;max-height:100px;overflow-y:auto;margin-top:10px}
 </style></head><body>
 
 <h1>Stream Deck Config</h1>
-<p class="sub">by Bits y Tornillos</p>
+<p class="sub">by Bits y Tornillos - conecta el ESP32 por USB</p>
 
-<div class="warn" id="warn">Usa <b>Google Chrome</b> para conectar por Bluetooth</div>
+<div id="warn" class="warn" style="display:none">Necesitas <b>Google Chrome</b> para conectar por USB</div>
 
 <div class="connect-bar">
-  <button class="connect-btn" id="connectBtn" onclick="connectBLE()">Conectar Bluetooth</button>
-  <span class="badge bt-off" id="btBadge">Desconectado</span>
+  <button class="connect-btn" id="connectBtn" onclick="connectUSB()">Conectar USB</button>
+  <span class="badge off" id="badge">Desconectado</span>
 </div>
 
 <div class="grid" id="grid"></div>
@@ -100,13 +101,11 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
 <button class="btn-save" onclick="saveBtn()">Guardar</button>
 </div></div></div>
 
-<script>
-const SVC = '12345678-1234-1234-1234-123456789abc';
-const CHW = '12345678-1234-1234-1234-123456789abd';
-const CHR = '12345678-1234-1234-1234-123456789abe';
+<div class="log" id="log"></div>
 
-let device=null, charW=null, charR=null, B=[], eI=-1;
-let responseBuffer = '';
+<script>
+let port=null, reader=null, writer=null, B=[], eI=-1;
+let readBuf='';
 
 const presets=[
 {i:"🔊",l:"Vol +",v:"vol_up"},{i:"🔉",l:"Vol -",v:"vol_down"},{i:"🔇",l:"Mute",v:"vol_mute"},
@@ -116,71 +115,97 @@ const presets=[
 const helps={0:"",1:"URL completa (https://...)",2:"Atajo: ctrl+c, vol_up, play_pause...",4:"Texto que se escribira"};
 const phs={0:"",1:"https://www.amazon.es",2:"ctrl+shift+a",4:"Hola mundo"};
 
-// Check Web Bluetooth support
-if(!navigator.bluetooth){document.getElementById('warn').style.display='block';}
+if(!("serial" in navigator)) document.getElementById('warn').style.display='block';
 
-async function connectBLE(){
+function log(msg){const el=document.getElementById('log');el.textContent+=msg+'\n';el.scrollTop=el.scrollHeight;}
+
+async function connectUSB(){
   try{
-    device = await navigator.bluetooth.requestDevice({
-      filters:[{name:'StreamDeck'}],
-      optionalServices:[SVC]
-    });
-    device.addEventListener('gattserverdisconnected',()=>{
-      document.getElementById('btBadge').textContent='Desconectado';
-      document.getElementById('btBadge').className='badge bt-off';
-      document.getElementById('connectBtn').disabled=false;
-    });
-    const server = await device.gatt.connect();
-    const svc = await server.getPrimaryService(SVC);
-    charW = await svc.getCharacteristic(CHW);
-    charR = await svc.getCharacteristic(CHR);
+    port = await navigator.serial.requestPort();
+    await port.open({baudRate:115200});
 
-    // Listen for notifications
-    await charR.startNotifications();
-    charR.addEventListener('characteristicvaluechanged', e=>{
-      const dec = new TextDecoder();
-      responseBuffer += dec.decode(e.target.value);
-    });
+    const textDec = new TextDecoderStream();
+    port.readable.pipeTo(textDec.writable);
+    reader = textDec.readable.getReader();
 
-    document.getElementById('btBadge').textContent='Conectado';
-    document.getElementById('btBadge').className='badge bt-on';
+    const textEnc = new TextEncoderStream();
+    textEnc.readable.pipeTo(port.writable);
+    writer = textEnc.writable.getWriter();
+
+    document.getElementById('badge').textContent='Conectado';
+    document.getElementById('badge').className='badge on';
     document.getElementById('connectBtn').disabled=true;
+    log('Conectado al ESP32');
 
-    // Load button config
+    // Start reading in background
+    readLoop();
+
+    // Load config
+    await new Promise(r=>setTimeout(r,500));
     await loadButtons();
-  }catch(e){console.error(e);alert('Error conectando: '+e.message);}
+  }catch(e){log('Error: '+e.message);alert('Error conectando: '+e.message);}
 }
 
-async function bleSend(cmd){
-  if(!charW)return;
-  const enc = new TextEncoder();
-  const data = enc.encode(cmd+'\n');
-  // Send in chunks (BLE MTU ~500)
-  for(let i=0;i<data.length;i+=500){
-    await charW.writeValueWithoutResponse(data.slice(i,i+500));
-    if(i+500<data.length) await new Promise(r=>setTimeout(r,30));
+async function readLoop(){
+  try{
+    while(true){
+      const {value,done}=await reader.read();
+      if(done)break;
+      readBuf+=value;
+    }
+  }catch(e){
+    log('Desconectado');
+    document.getElementById('badge').textContent='Desconectado';
+    document.getElementById('badge').className='badge off';
+    document.getElementById('connectBtn').disabled=false;
   }
 }
 
-async function bleRead(timeout=2000){
-  responseBuffer='';
+async function send(cmd){
+  if(!writer)return;
+  await writer.write(cmd+'\n');
+}
+
+async function sendAndWait(cmd, timeout=2000){
+  readBuf='';
+  await send(cmd);
   const start=Date.now();
   while(Date.now()-start<timeout){
-    await new Promise(r=>setTimeout(r,100));
-    if(responseBuffer.length>0){
-      // Wait a bit more for remaining chunks
-      await new Promise(r=>setTimeout(r,200));
+    await new Promise(r=>setTimeout(r,50));
+    if(readBuf.includes('\n')){
+      await new Promise(r=>setTimeout(r,100)); // wait for remaining data
       break;
     }
   }
-  return responseBuffer;
+  const resp=readBuf;
+  readBuf='';
+  return resp.trim();
 }
 
 async function loadButtons(){
-  await bleSend('GETALL');
-  const resp = await bleRead(3000);
-  try{B=JSON.parse(resp);render();}
-  catch(e){console.error('Parse error:',resp,e);}
+  log('Cargando config...');
+  const resp = await sendAndWait('GETALL', 3000);
+  log('Respuesta: '+resp.substring(0,80)+'...');
+  try{
+    // Parse CFG:N:label:R,G,B:hasIcon:iconSize,border,showLabel lines
+    const lines = resp.split('\n').filter(l=>l.startsWith('CFG:'));
+    B=[];
+    for(const line of lines){
+      const parts=line.split(':');
+      if(parts.length<4)continue;
+      const i=parseInt(parts[1]);
+      const label=parts[2];
+      const colors=parts[3].split(',');
+      const hasIcon=parts[4]||'0';
+      const style=(parts[5]||'1,0,1').split(',');
+      B[i]={l:label,r:parseInt(colors[0]),g:parseInt(colors[1]),b:parseInt(colors[2]),
+        a:'',y:0,z:parseInt(style[0]||1),d:parseInt(style[1]||0),t:parseInt(style[2]||1)};
+    }
+    // Load actions from saved config on ESP32 (they're in Preferences, need separate query)
+    // For now, show what we have
+    if(B.length>0){render();log('Config cargada: '+B.length+' botones');}
+    else log('No se pudo cargar la config');
+  }catch(e){log('Error parseando: '+e.message);}
 }
 
 function render(){
@@ -197,9 +222,9 @@ function openModal(i){eI=i;const b=B[i];
   document.getElementById('eLabel').value=b.l;
   document.getElementById('eColor').value=rgbHex(b.r,b.g,b.b);
   document.getElementById('eAction').value=b.a||'';
-  document.querySelector(`input[name=aType][value="${b.y}"]`).checked=true;
-  document.querySelector(`input[name=iSize][value="${b.z}"]`).checked=true;
-  document.querySelector(`input[name=bStyle][value="${b.d}"]`).checked=true;
+  document.querySelector(`input[name=aType][value="${b.y||0}"]`).checked=true;
+  document.querySelector(`input[name=iSize][value="${b.z||1}"]`).checked=true;
+  document.querySelector(`input[name=bStyle][value="${b.d||0}"]`).checked=true;
   document.getElementById('eShowLabel').checked=!!b.t;
   updHelp();document.getElementById('overlay').classList.add('active');}
 
@@ -223,22 +248,33 @@ document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==
 
 async function saveBtn(){
   const i=eI,c=hexRgb(document.getElementById('eColor').value);
-  const data={l:document.getElementById('eLabel').value||String(i+1),
-    r:c[0],g:c[1],b:c[2],
-    a:document.getElementById('eAction').value,
-    y:+document.querySelector('input[name=aType]:checked').value,
-    z:+document.querySelector('input[name=iSize]:checked').value,
-    d:+document.querySelector('input[name=bStyle]:checked').value,
-    t:document.getElementById('eShowLabel').checked?1:0};
-  await bleSend('SET:'+i+':'+JSON.stringify(data));
-  await bleRead(1000);
-  B[i]=data;render();closeModal();}
+  const label=document.getElementById('eLabel').value||String(i+1);
+  const action=document.getElementById('eAction').value;
+  const actionType=+document.querySelector('input[name=aType]:checked').value;
+  const iconSize=+document.querySelector('input[name=iSize]:checked').value;
+  const borderStyle=+document.querySelector('input[name=bStyle]:checked').value;
+  const showLabel=document.getElementById('eShowLabel').checked?1:0;
+
+  const cmd=`SET:${i}:${label}:${c[0]},${c[1]},${c[2]}:${iconSize},${borderStyle},${showLabel}`;
+  log('Enviando: '+cmd);
+  const resp = await sendAndWait(cmd, 2000);
+  log('Respuesta: '+resp);
+
+  // Also send action config
+  const actCmd=`ACT:${i}:${actionType}:${action}`;
+  log('Enviando: '+actCmd);
+  const resp2 = await sendAndWait(actCmd, 2000);
+  log('Respuesta: '+resp2);
+
+  B[i]={l:label,r:c[0],g:c[1],b:c[2],a:action,y:actionType,z:iconSize,d:borderStyle,t:showLabel};
+  render();closeModal();}
 
 async function clearBtn(){
   const i=eI;
-  const data={l:String(i+1),r:100,g:100,b:100,a:'',y:0,z:1,d:0,t:1};
-  await bleSend('SET:'+i+':'+JSON.stringify(data));
-  await bleRead(1000);
-  B[i]=data;render();closeModal();}
+  const cmd=`SET:${i}:${i+1}:100,100,100:1,0,1`;
+  await sendAndWait(cmd);
+  await sendAndWait(`ACT:${i}:0:`);
+  B[i]={l:String(i+1),r:100,g:100,b:100,a:'',y:0,z:1,d:0,t:1};
+  render();closeModal();}
 </script>
 </body></html>

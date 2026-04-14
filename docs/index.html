@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stream Deck Config</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,sans-serif;background:#1a1a2e;color:#eee;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:20px 12px}
+h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.sub{color:#888;margin-bottom:16px;font-size:13px}
+.connect-bar{display:flex;gap:10px;align-items:center;margin-bottom:20px}
+.connect-btn{padding:10px 24px;border-radius:10px;border:none;background:#667eea;color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+.connect-btn:hover{background:#5a6fd6}
+.connect-btn:disabled{background:#333;color:#666;cursor:default}
+.badge{padding:4px 12px;border-radius:12px;font-size:12px}
+.bt-on{background:#1a3a5c;color:#4aa8ff}
+.bt-off{background:#3b1111;color:#f87171}
+
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;max-width:640px;width:100%;margin-bottom:20px}
+.btn-card{aspect-ratio:1.3;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;box-shadow:0 3px 10px rgba(0,0,0,.4);border:2px solid transparent;gap:4px;position:relative}
+.btn-card:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.3)}
+.btn-card .label{font-size:14px;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+.btn-card .hint{font-size:10px;opacity:.6;max-width:90%;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn-card .ei{position:absolute;top:6px;right:8px;font-size:12px;opacity:0;transition:opacity .2s}
+.btn-card:hover .ei{opacity:.8}
+
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center}
+.overlay.active{display:flex}
+.modal{background:#16213e;border-radius:16px;padding:24px;width:420px;max-width:95vw;box-shadow:0 15px 50px rgba(0,0,0,.5);max-height:90vh;overflow-y:auto}
+.modal h2{margin-bottom:16px;font-size:18px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;color:#aaa;margin-bottom:4px}
+.field input,.field select{width:100%;padding:8px 12px;border-radius:8px;border:1px solid #333;background:#0f1a30;color:#eee;font-size:14px;outline:none}
+.field input:focus{border-color:#667eea}
+.field input[type=color]{height:40px;padding:3px;cursor:pointer}
+.pills{display:flex;gap:4px}
+.pills label{flex:1;text-align:center;padding:7px;border-radius:6px;background:#0f1a30;border:1px solid #333;cursor:pointer;font-size:12px;transition:all .2s}
+.pills input{display:none}
+.pills label:has(input:checked){border-color:#667eea;background:#1a2540;color:#667eea}
+.presets{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:8px}
+.preset{padding:6px;border-radius:6px;background:#0f1a30;border:1px solid #333;color:#ccc;font-size:11px;cursor:pointer;text-align:center}
+.preset:hover{border-color:#667eea;color:#fff}
+.preset .pi{font-size:16px;display:block}
+.sep{border-top:1px solid #2a2a3e;margin:16px 0}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;cursor:pointer}
+.toggle-row input{display:none}
+.toggle-sw{width:40px;height:22px;background:#333;border-radius:11px;position:relative;transition:background .2s}
+.toggle-sw::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;background:#888;border-radius:50%;transition:all .2s}
+.toggle-row input:checked+.toggle-sw{background:#667eea}
+.toggle-row input:checked+.toggle-sw::after{left:20px;background:#fff}
+.actions{display:flex;gap:8px;margin-top:18px}
+.actions button{flex:1;padding:10px;border-radius:8px;border:none;font-size:14px;font-weight:600;cursor:pointer}
+.btn-save{background:#667eea;color:#fff}.btn-cancel{background:#2a2a3e;color:#aaa}.btn-clear{background:#dc2626;color:#fff}
+.help{font-size:10px;color:#555;margin-top:4px}
+.warn{background:#2a2000;border:1px solid #665500;border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px;color:#ffcc00;text-align:center;display:none}
+</style></head><body>
+
+<h1>Stream Deck Config</h1>
+<p class="sub">by Bits y Tornillos</p>
+
+<div class="warn" id="warn">Usa <b>Google Chrome</b> para conectar por Bluetooth</div>
+
+<div class="connect-bar">
+  <button class="connect-btn" id="connectBtn" onclick="connectBLE()">Conectar Bluetooth</button>
+  <span class="badge bt-off" id="btBadge">Desconectado</span>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<div class="overlay" id="overlay">
+<div class="modal">
+<h2>Boton <span id="eIdx"></span></h2>
+<div class="field"><label>Nombre</label><input type="text" id="eLabel" maxlength="19"></div>
+<div class="field"><label>Color</label><input type="color" id="eColor"></div>
+<div class="field"><label>Accion</label>
+<div class="pills">
+<label><input type="radio" name="aType" value="0"><span>Ninguna</span></label>
+<label><input type="radio" name="aType" value="1"><span>URL</span></label>
+<label><input type="radio" name="aType" value="2"><span>Teclado</span></label>
+<label><input type="radio" name="aType" value="4"><span>Texto</span></label>
+</div></div>
+<div id="presetBox" style="display:none"><div class="presets" id="presets"></div></div>
+<div class="field"><label>Valor</label><input type="text" id="eAction" placeholder="https://..."><div class="help" id="eHelp"></div></div>
+<div class="sep"></div>
+<div class="field"><label>Tamano icono</label><div class="pills">
+<label><input type="radio" name="iSize" value="0"><span>S</span></label>
+<label><input type="radio" name="iSize" value="1"><span>M</span></label>
+<label><input type="radio" name="iSize" value="2"><span>L</span></label>
+<label><input type="radio" name="iSize" value="3"><span>XL</span></label>
+</div></div>
+<div class="field"><label>Marco</label><div class="pills">
+<label><input type="radio" name="bStyle" value="0"><span>No</span></label>
+<label><input type="radio" name="bStyle" value="1"><span>Fino</span></label>
+<label><input type="radio" name="bStyle" value="2"><span>Grueso</span></label>
+<label><input type="radio" name="bStyle" value="3"><span>Glow</span></label>
+</div></div>
+<div class="field"><label class="toggle-row"><span>Mostrar texto</span><input type="checkbox" id="eShowLabel" checked><span class="toggle-sw"></span></label></div>
+<div class="actions">
+<button class="btn-cancel" onclick="closeModal()">Cancelar</button>
+<button class="btn-clear" onclick="clearBtn()">Limpiar</button>
+<button class="btn-save" onclick="saveBtn()">Guardar</button>
+</div></div></div>
+
+<script>
+const SVC = '12345678-1234-1234-1234-123456789abc';
+const CHW = '12345678-1234-1234-1234-123456789abd';
+const CHR = '12345678-1234-1234-1234-123456789abe';
+
+let device=null, charW=null, charR=null, B=[], eI=-1;
+let responseBuffer = '';
+
+const presets=[
+{i:"🔊",l:"Vol +",v:"vol_up"},{i:"🔉",l:"Vol -",v:"vol_down"},{i:"🔇",l:"Mute",v:"vol_mute"},
+{i:"⏯",l:"Play",v:"play_pause"},{i:"⏭",l:"Next",v:"next_track"},{i:"⏮",l:"Prev",v:"prev_track"},
+{i:"📋",l:"Copy",v:"ctrl+c"},{i:"📌",l:"Paste",v:"ctrl+v"},{i:"↩",l:"Undo",v:"ctrl+z"},
+{i:"💾",l:"Save",v:"ctrl+s"},{i:"🔍",l:"Find",v:"ctrl+f"},{i:"📸",l:"Screenshot",v:"gui+shift+s"}];
+const helps={0:"",1:"URL completa (https://...)",2:"Atajo: ctrl+c, vol_up, play_pause...",4:"Texto que se escribira"};
+const phs={0:"",1:"https://www.amazon.es",2:"ctrl+shift+a",4:"Hola mundo"};
+
+// Check Web Bluetooth support
+if(!navigator.bluetooth){document.getElementById('warn').style.display='block';}
+
+async function connectBLE(){
+  try{
+    device = await navigator.bluetooth.requestDevice({
+      filters:[{name:'StreamDeck'}],
+      optionalServices:[SVC]
+    });
+    device.addEventListener('gattserverdisconnected',()=>{
+      document.getElementById('btBadge').textContent='Desconectado';
+      document.getElementById('btBadge').className='badge bt-off';
+      document.getElementById('connectBtn').disabled=false;
+    });
+    const server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(SVC);
+    charW = await svc.getCharacteristic(CHW);
+    charR = await svc.getCharacteristic(CHR);
+
+    // Listen for notifications
+    await charR.startNotifications();
+    charR.addEventListener('characteristicvaluechanged', e=>{
+      const dec = new TextDecoder();
+      responseBuffer += dec.decode(e.target.value);
+    });
+
+    document.getElementById('btBadge').textContent='Conectado';
+    document.getElementById('btBadge').className='badge bt-on';
+    document.getElementById('connectBtn').disabled=true;
+
+    // Load button config
+    await loadButtons();
+  }catch(e){console.error(e);alert('Error conectando: '+e.message);}
+}
+
+async function bleSend(cmd){
+  if(!charW)return;
+  const enc = new TextEncoder();
+  const data = enc.encode(cmd+'\n');
+  // Send in chunks (BLE MTU ~500)
+  for(let i=0;i<data.length;i+=500){
+    await charW.writeValueWithoutResponse(data.slice(i,i+500));
+    if(i+500<data.length) await new Promise(r=>setTimeout(r,30));
+  }
+}
+
+async function bleRead(timeout=2000){
+  responseBuffer='';
+  const start=Date.now();
+  while(Date.now()-start<timeout){
+    await new Promise(r=>setTimeout(r,100));
+    if(responseBuffer.length>0){
+      // Wait a bit more for remaining chunks
+      await new Promise(r=>setTimeout(r,200));
+      break;
+    }
+  }
+  return responseBuffer;
+}
+
+async function loadButtons(){
+  await bleSend('GETALL');
+  const resp = await bleRead(3000);
+  try{B=JSON.parse(resp);render();}
+  catch(e){console.error('Parse error:',resp,e);}
+}
+
+function render(){
+  const g=document.getElementById('grid');g.innerHTML='';
+  B.forEach((b,i)=>{const d=document.createElement('div');d.className='btn-card';
+    d.style.background=`rgb(${b.r},${b.g},${b.b})`;
+    let h=b.a?(b.a.replace('https://','').replace('http://','').substring(0,20)):'';
+    d.innerHTML=`<span class="ei">✎</span><span class="label">${b.l}</span><span class="hint">${h}</span>`;
+    d.onclick=()=>openModal(i);g.appendChild(d);});
+}
+
+function openModal(i){eI=i;const b=B[i];
+  document.getElementById('eIdx').textContent=i+1;
+  document.getElementById('eLabel').value=b.l;
+  document.getElementById('eColor').value=rgbHex(b.r,b.g,b.b);
+  document.getElementById('eAction').value=b.a||'';
+  document.querySelector(`input[name=aType][value="${b.y}"]`).checked=true;
+  document.querySelector(`input[name=iSize][value="${b.z}"]`).checked=true;
+  document.querySelector(`input[name=bStyle][value="${b.d}"]`).checked=true;
+  document.getElementById('eShowLabel').checked=!!b.t;
+  updHelp();document.getElementById('overlay').classList.add('active');}
+
+function closeModal(){document.getElementById('overlay').classList.remove('active');eI=-1;}
+function rgbHex(r,g,b){return'#'+[r,g,b].map(x=>x.toString(16).padStart(2,'0')).join('');}
+function hexRgb(h){const m=h.match(/^#?(\w{2})(\w{2})(\w{2})$/);return m?[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)]:[100,100,100];}
+
+function updHelp(){
+  const t=+document.querySelector('input[name=aType]:checked').value;
+  document.getElementById('eHelp').textContent=helps[t]||'';
+  document.getElementById('eAction').placeholder=phs[t]||'';
+  const pb=document.getElementById('presetBox');
+  if(t===2){pb.style.display='';const pg=document.getElementById('presets');pg.innerHTML='';
+    presets.forEach(p=>{const d=document.createElement('div');d.className='preset';
+      d.innerHTML=`<span class="pi">${p.i}</span>${p.l}`;
+      d.onclick=()=>{document.getElementById('eAction').value=p.v;document.getElementById('eLabel').value=p.l;};
+      pg.appendChild(d);});}else pb.style.display='none';}
+
+document.querySelectorAll('input[name=aType]').forEach(r=>r.addEventListener('change',updHelp));
+document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeModal();});
+
+async function saveBtn(){
+  const i=eI,c=hexRgb(document.getElementById('eColor').value);
+  const data={l:document.getElementById('eLabel').value||String(i+1),
+    r:c[0],g:c[1],b:c[2],
+    a:document.getElementById('eAction').value,
+    y:+document.querySelector('input[name=aType]:checked').value,
+    z:+document.querySelector('input[name=iSize]:checked').value,
+    d:+document.querySelector('input[name=bStyle]:checked').value,
+    t:document.getElementById('eShowLabel').checked?1:0};
+  await bleSend('SET:'+i+':'+JSON.stringify(data));
+  await bleRead(1000);
+  B[i]=data;render();closeModal();}
+
+async function clearBtn(){
+  const i=eI;
+  const data={l:String(i+1),r:100,g:100,b:100,a:'',y:0,z:1,d:0,t:1};
+  await bleSend('SET:'+i+':'+JSON.stringify(data));
+  await bleRead(1000);
+  B[i]=data;render();closeModal();}
+</script>
+</body></html>

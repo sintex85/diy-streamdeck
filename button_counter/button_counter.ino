@@ -1,8 +1,23 @@
 #include "LGFX_ESP32S3_RGB_ESP32-8048S043.h"
 #include <Preferences.h>
+#include <BleKeyboard.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+#include <BLE2902.h>
 
 LGFX lcd;
 Preferences prefs;
+BleKeyboard bleKb("StreamDeck", "BitsyTornillos", 100);
+
+// BLE Config Service
+#define CONFIG_SERVICE_UUID        "12345678-1234-1234-1234-123456789abc"
+#define CONFIG_CHAR_WRITE_UUID     "12345678-1234-1234-1234-123456789abd"
+#define CONFIG_CHAR_READ_UUID      "12345678-1234-1234-1234-123456789abe"
+
+BLECharacteristic *pConfigWrite = NULL;
+BLECharacteristic *pConfigRead = NULL;
+bool bleConfigReady = false;
 
 // ─── Layout ───
 static const int SIDEBAR_W = 56;
@@ -19,12 +34,14 @@ static const int SB_ITEM_H = 70;
 static const uint16_t SB_BG = 0x1082;
 
 static const int ICON_SIZES[] = {24, 32, 48, 64};
-enum BorderStyle { BORDER_NONE=0, BORDER_THIN=1, BORDER_THICK=2, BORDER_GLOW=3 };
 
 struct Button {
   char label[20];
   uint8_t r, g, b;
-  uint8_t iconSizeIdx, borderStyle;
+  char action[128];
+  uint8_t actionType;  // 0=none, 1=url, 2=keyboard, 3=app, 4=text
+  uint8_t iconSizeIdx;
+  uint8_t borderStyle;
   bool showLabel;
 };
 
@@ -33,37 +50,22 @@ uint16_t* iconData[NUM_BUTTONS];
 bool hasIcon[NUM_BUTTONS];
 int iconPixelSize[NUM_BUTTONS];
 int activeButton = -1;
-
-// State
-bool pcConnected = false;
-unsigned long lastSerialTime = 0;
 bool locked = false;
 uint8_t brightness = 255;
 int activeSidebar = -1;
-bool setupShown = false;
-bool everConnected = false;
 
 // Defaults
-static const char* defaultLabels[NUM_BUTTONS] = {"1","2","3","4","5","6","7","8","9","10","11","12"};
-static const uint8_t defaultColors[NUM_BUTTONS][3] = {
+static const char* defaultLabels[] = {"1","2","3","4","5","6","7","8","9","10","11","12"};
+static const uint8_t defaultColors[][3] = {
   {231,76,60},{46,204,113},{52,152,219},{241,196,15},
   {155,89,182},{230,126,34},{26,188,156},{236,64,122},
   {52,73,94},{127,140,141},{39,174,96},{41,128,185},
 };
 
-// ─── QR Code for github.com/sintex85/diy-streamdeck ───
-// 25x25 QR (version 2), 1 = black module
-static const uint8_t QR_DATA[] PROGMEM = {
-  // This is a simplified visual QR representation drawn with rectangles
-  // We'll draw a fake-but-recognizable QR pattern + the URL as text
-  // Real QR would need a library - we'll use a visual shortcut
-};
-static const int QR_SIZE = 0; // We'll draw URL instead
-
 // ─── Base64 ───
 int b64val(char c) {
   if(c>='A'&&c<='Z')return c-'A'; if(c>='a'&&c<='z')return c-'a'+26;
-  if(c>='0'&&c<='9')return c-'0'+52; if(c=='+')return 62; if(c=='/') return 63; return -1;
+  if(c>='0'&&c<='9')return c-'0'+52; if(c=='+')return 62; if(c=='/')return 63; return -1;
 }
 int base64_decode(const char* in, int inLen, uint8_t* out, int outMax) {
   int outLen=0; uint32_t buf=0; int bits=0;
@@ -84,6 +86,8 @@ void saveConfig() {
     snprintf(k,8,"r%d",i); prefs.putUChar(k,buttons[i].r);
     snprintf(k,8,"g%d",i); prefs.putUChar(k,buttons[i].g);
     snprintf(k,8,"b%d",i); prefs.putUChar(k,buttons[i].b);
+    snprintf(k,8,"a%d",i); prefs.putString(k,buttons[i].action);
+    snprintf(k,8,"y%d",i); prefs.putUChar(k,buttons[i].actionType);
     snprintf(k,8,"z%d",i); prefs.putUChar(k,buttons[i].iconSizeIdx);
     snprintf(k,8,"d%d",i); prefs.putUChar(k,buttons[i].borderStyle);
     snprintf(k,8,"t%d",i); prefs.putBool(k,buttons[i].showLabel);
@@ -100,6 +104,9 @@ void loadConfig() {
     snprintf(k,8,"r%d",i); buttons[i].r=prefs.getUChar(k,defaultColors[i][0]);
     snprintf(k,8,"g%d",i); buttons[i].g=prefs.getUChar(k,defaultColors[i][1]);
     snprintf(k,8,"b%d",i); buttons[i].b=prefs.getUChar(k,defaultColors[i][2]);
+    snprintf(k,8,"a%d",i); String act=prefs.getString(k,"");
+    strncpy(buttons[i].action,act.c_str(),127); buttons[i].action[127]='\0';
+    snprintf(k,8,"y%d",i); buttons[i].actionType=prefs.getUChar(k,0);
     snprintf(k,8,"z%d",i); buttons[i].iconSizeIdx=prefs.getUChar(k,1);
     snprintf(k,8,"d%d",i); buttons[i].borderStyle=prefs.getUChar(k,0);
     snprintf(k,8,"t%d",i); buttons[i].showLabel=prefs.getBool(k,true);
@@ -108,41 +115,109 @@ void loadConfig() {
   prefs.end();
 }
 
+// ─── BLE Actions ───
+void openUrlViaBLE(const char* url) {
+  if(!bleKb.isConnected()) return;
+  bleKb.press(KEY_LEFT_GUI);
+  bleKb.press('l');
+  delay(50);
+  bleKb.releaseAll();
+  delay(400);
+  bleKb.print(url);
+  delay(100);
+  bleKb.write(KEY_RETURN);
+}
+
+void sendKeyCombo(const char* combo) {
+  if(!bleKb.isConnected()) return;
+  String s = String(combo); s.toLowerCase();
+
+  // Media keys
+  if(s=="vol_up"){bleKb.write(KEY_MEDIA_VOLUME_UP);return;}
+  if(s=="vol_down"){bleKb.write(KEY_MEDIA_VOLUME_DOWN);return;}
+  if(s=="vol_mute"){bleKb.write(KEY_MEDIA_MUTE);return;}
+  if(s=="play_pause"){bleKb.write(KEY_MEDIA_PLAY_PAUSE);return;}
+  if(s=="next_track"){bleKb.write(KEY_MEDIA_NEXT_TRACK);return;}
+  if(s=="prev_track"){bleKb.write(KEY_MEDIA_PREVIOUS_TRACK);return;}
+
+  // Parse modifiers
+  bool ctrl=false,shift=false,alt=false,gui=false;
+  int last=-1;
+  while(true){int p=s.indexOf('+',last+1);if(p<0)break;
+    String m=s.substring(last+1,p);m.trim();
+    if(m=="ctrl"||m=="control")ctrl=true;
+    else if(m=="shift")shift=true;
+    else if(m=="alt"||m=="option")alt=true;
+    else if(m=="cmd"||m=="command"||m=="win"||m=="gui")gui=true;
+    last=p;}
+  String key=s.substring(last+1);key.trim();
+
+  if(ctrl)bleKb.press(KEY_LEFT_CTRL);
+  if(shift)bleKb.press(KEY_LEFT_SHIFT);
+  if(alt)bleKb.press(KEY_LEFT_ALT);
+  if(gui)bleKb.press(KEY_LEFT_GUI);
+
+  if(key.length()==1) bleKb.press(key[0]);
+  else if(key=="enter"||key=="return") bleKb.press(KEY_RETURN);
+  else if(key=="esc") bleKb.press(KEY_ESC);
+  else if(key=="tab") bleKb.press(KEY_TAB);
+  else if(key=="space") bleKb.press(' ');
+  else if(key=="backspace"||key=="delete") bleKb.press(KEY_BACKSPACE);
+  else if(key=="up") bleKb.press(KEY_UP_ARROW);
+  else if(key=="down") bleKb.press(KEY_DOWN_ARROW);
+  else if(key=="left") bleKb.press(KEY_LEFT_ARROW);
+  else if(key=="right") bleKb.press(KEY_RIGHT_ARROW);
+  else if(key.startsWith("f")&&key.length()<=3){
+    int f=key.substring(1).toInt();
+    if(f>=1&&f<=12)bleKb.press(KEY_F1+f-1);}
+
+  delay(50);
+  bleKb.releaseAll();
+}
+
+void executeAction(int idx) {
+  if(idx<0||idx>=NUM_BUTTONS||buttons[idx].actionType==0||strlen(buttons[idx].action)==0) return;
+  switch(buttons[idx].actionType){
+    case 1: case 3: openUrlViaBLE(buttons[idx].action); break;
+    case 2: sendKeyCombo(buttons[idx].action); break;
+    case 4: if(bleKb.isConnected()) bleKb.print(buttons[idx].action); break;
+  }
+}
+
 // ─── Sidebar ───
-void drawGearIcon(int cx, int cy, uint16_t col) {
-  lcd.fillCircle(cx,cy,8,col); lcd.fillCircle(cx,cy,4,SB_BG);
-  for(int a=0;a<360;a+=45){float r=a*3.14159/180; lcd.fillCircle(cx+cos(r)*11,cy+sin(r)*11,3,col);}
-}
-void drawSunIcon(int cx, int cy, uint16_t col, bool big) {
-  int r=big?7:5; lcd.fillCircle(cx,cy,r,col);
-  int rl=big?13:10;
-  for(int a=0;a<360;a+=45){float rd=a*3.14159/180; lcd.drawLine(cx+cos(rd)*(r+2),cy+sin(rd)*(r+2),cx+cos(rd)*rl,cy+sin(rd)*rl,col);}
-}
-void drawLockIcon(int cx, int cy, uint16_t col, bool isLocked) {
+void drawGearIcon(int cx,int cy,uint16_t col){
+  lcd.fillCircle(cx,cy,8,col);lcd.fillCircle(cx,cy,4,SB_BG);
+  for(int a=0;a<360;a+=45){float r=a*3.14159/180;lcd.fillCircle(cx+cos(r)*11,cy+sin(r)*11,3,col);}}
+void drawSunIcon(int cx,int cy,uint16_t col,bool big){
+  int r=big?7:5;lcd.fillCircle(cx,cy,r,col);int rl=big?13:10;
+  for(int a=0;a<360;a+=45){float rd=a*3.14159/180;lcd.drawLine(cx+cos(rd)*(r+2),cy+sin(rd)*(r+2),cx+cos(rd)*rl,cy+sin(rd)*rl,col);}}
+void drawLockIcon(int cx,int cy,uint16_t col,bool isLocked){
   lcd.fillRoundRect(cx-8,cy-2,16,12,2,col);
-  if(isLocked) lcd.drawArc(cx,cy-2,7,5,180,360,col);
+  if(isLocked)lcd.drawArc(cx,cy-2,7,5,180,360,col);
   else lcd.drawArc(cx+3,cy-2,7,5,180,360,col);
-  lcd.fillCircle(cx,cy+3,2,SB_BG);
-}
+  lcd.fillCircle(cx,cy+3,2,SB_BG);}
 
 void drawSidebar() {
   lcd.fillRect(SB_X,0,SIDEBAR_W,480,SB_BG);
   lcd.drawFastVLine(SB_X,0,480,lcd.color565(40,40,50));
   int cx=SB_X+SIDEBAR_W/2, y=0;
 
-  uint16_t ledC=pcConnected?lcd.color565(0,220,80):lcd.color565(80,80,80);
+  // BLE status
+  bool conn=bleKb.isConnected();
+  uint16_t ledC=conn?lcd.color565(0,150,255):lcd.color565(80,80,80);
   lcd.fillCircle(cx,y+25,6,ledC);
-  if(pcConnected){lcd.drawCircle(cx,y+25,8,lcd.color565(0,100,40));lcd.drawCircle(cx,y+25,10,lcd.color565(0,50,20));}
-  lcd.setTextColor(lcd.color565(120,120,130)); lcd.setTextDatum(middle_center); lcd.setFont(&fonts::Font0);
-  lcd.drawString(pcConnected?"ON":"OFF",cx,y+42); y+=SB_ITEM_H;
+  if(conn){lcd.drawCircle(cx,y+25,8,lcd.color565(0,70,130));lcd.drawCircle(cx,y+25,10,lcd.color565(0,35,65));}
+  lcd.setTextColor(lcd.color565(120,120,130));lcd.setTextDatum(middle_center);lcd.setFont(&fonts::Font0);
+  lcd.drawString(conn?"BT OK":"BT...",cx,y+42); y+=SB_ITEM_H;
   lcd.drawFastHLine(SB_X+8,y,SIDEBAR_W-16,lcd.color565(40,40,50));
 
+  // Config (via BLE)
   drawGearIcon(cx,y+28,lcd.color565(180,180,200));
-  lcd.setTextColor(lcd.color565(120,120,130)); lcd.drawString("Config",cx,y+48); y+=SB_ITEM_H;
+  lcd.setTextColor(lcd.color565(120,120,130));lcd.drawString("Config",cx,y+48); y+=SB_ITEM_H;
   lcd.drawFastHLine(SB_X+8,y,SIDEBAR_W-16,lcd.color565(40,40,50));
 
-  drawSunIcon(cx,y+25,lcd.color565(255,220,50),true); lcd.drawString("Brillo+",cx,y+46); y+=SB_ITEM_H;
-  drawSunIcon(cx,y+25,lcd.color565(150,130,30),false); lcd.drawString("Brillo-",cx,y+46); y+=SB_ITEM_H;
+  drawSunIcon(cx,y+25,lcd.color565(255,220,50),true);lcd.drawString("Brillo+",cx,y+46); y+=SB_ITEM_H;
+  drawSunIcon(cx,y+25,lcd.color565(150,130,30),false);lcd.drawString("Brillo-",cx,y+46); y+=SB_ITEM_H;
   lcd.drawFastHLine(SB_X+8,y,SIDEBAR_W-16,lcd.color565(40,40,50));
 
   uint16_t lc=locked?lcd.color565(231,76,60):lcd.color565(120,120,140);
@@ -151,266 +226,247 @@ void drawSidebar() {
   lcd.drawString(locked?"Bloq":"Libre",cx,y+46); y+=SB_ITEM_H;
   lcd.drawFastHLine(SB_X+8,y,SIDEBAR_W-16,lcd.color565(40,40,50));
 
-  int bx=SB_X+10, bw=SIDEBAR_W-20;
+  // Config URL
+  lcd.setTextColor(lcd.color565(100,126,234));
+  lcd.drawString("Config:",cx,y+15);
+  lcd.setTextColor(lcd.color565(80,80,100));
+  lcd.drawString("Chrome",cx,y+30);
+  lcd.drawString("BLE",cx,y+43);
+  y+=SB_ITEM_H;
+
+  // Brightness bar
+  int bx=SB_X+10,bw=SIDEBAR_W-20;
   lcd.fillRoundRect(bx,440,bw,6,3,lcd.color565(40,40,50));
   lcd.fillRoundRect(bx,440,(brightness*bw)/255,6,3,lcd.color565(255,220,50));
-  char buf[8]; snprintf(buf,8,"%d%%",(brightness*100)/255);
-  lcd.setTextColor(lcd.color565(100,100,110)); lcd.drawString(buf,cx,458);
+  char buf[8];snprintf(buf,8,"%d%%",(brightness*100)/255);
+  lcd.setTextColor(lcd.color565(100,100,110));lcd.drawString(buf,cx,458);
 }
 
-int sidebarHitTest(int32_t tx, int32_t ty) { if(tx<SB_X)return -1; return ty/SB_ITEM_H; }
-void handleSidebarTouch(int item) {
+int sidebarHitTest(int32_t tx,int32_t ty){if(tx<SB_X)return -1;return ty/SB_ITEM_H;}
+void handleSidebarTouch(int item){
   switch(item){
-    case 1: Serial.println("OPENCONFIG"); break;
-    case 2: brightness=min(255,brightness+30); lcd.setBrightness(brightness); saveConfig(); drawSidebar(); break;
-    case 3: brightness=max(25,brightness-30); lcd.setBrightness(brightness); saveConfig(); drawSidebar(); break;
-    case 4: locked=!locked; drawSidebar(); break;
-  }
-}
+    case 2:brightness=min(255,brightness+30);lcd.setBrightness(brightness);saveConfig();drawSidebar();break;
+    case 3:brightness=max(25,brightness-30);lcd.setBrightness(brightness);saveConfig();drawSidebar();break;
+    case 4:locked=!locked;drawSidebar();break;
+  }}
 
 // ─── Buttons ───
-void getBtnRect(int idx, int &x, int &y) { x=PAD+(idx%COLS)*(BTN_W+PAD); y=PAD+(idx/COLS)*(BTN_H+PAD); }
-void drawBorder(int bx, int by, int w, int h, uint8_t style, uint8_t cr, uint8_t cg, uint8_t cb) {
-  if(style==BORDER_NONE)return;
+void getBtnRect(int idx,int &x,int &y){x=PAD+(idx%COLS)*(BTN_W+PAD);y=PAD+(idx/COLS)*(BTN_H+PAD);}
+void drawBorder(int bx,int by,int w,int h,uint8_t style,uint8_t cr,uint8_t cg,uint8_t cb){
+  if(style==0)return;
   uint16_t bc=lcd.color565(min(255,cr+80),min(255,cg+80),min(255,cb+80));
-  if(style==BORDER_THIN) lcd.drawRoundRect(bx,by,w,h,RADIUS,bc);
-  else if(style==BORDER_THICK) for(int i=0;i<3;i++) lcd.drawRoundRect(bx+i,by+i,w-i*2,h-i*2,RADIUS-i,bc);
-  else if(style==BORDER_GLOW) for(int g=4;g>=0;g--){
-    uint8_t a=60+(4-g)*45;
-    lcd.drawRoundRect(bx-g,by-g,w+g*2,h+g*2,RADIUS+g,lcd.color565(min(255,(int)cr+a),min(255,(int)cg+a),min(255,(int)cb+a)));
-  }
-}
-void drawButton(int idx, bool pressed) {
-  int bx,by; getBtnRect(idx,bx,by);
-  uint8_t r=buttons[idx].r, g=buttons[idx].g, b=buttons[idx].b;
+  if(style==1)lcd.drawRoundRect(bx,by,w,h,RADIUS,bc);
+  else if(style==2)for(int i=0;i<3;i++)lcd.drawRoundRect(bx+i,by+i,w-i*2,h-i*2,RADIUS-i,bc);
+  else if(style==3)for(int g=4;g>=0;g--){uint8_t a=60+(4-g)*45;
+    lcd.drawRoundRect(bx-g,by-g,w+g*2,h+g*2,RADIUS+g,lcd.color565(min(255,(int)cr+a),min(255,(int)cg+a),min(255,(int)cb+a)));}}
+
+void drawButton(int idx,bool pressed){
+  int bx,by;getBtnRect(idx,bx,by);
+  uint8_t r=buttons[idx].r,g=buttons[idx].g,b=buttons[idx].b;
   uint16_t color=pressed?lcd.color565(r*0.6,g*0.6,b*0.6):lcd.color565(r,g,b);
   int yOff=pressed?3:0;
   lcd.fillRect(bx-5,by-5,BTN_W+14,BTN_H+16,TFT_BLACK);
-  if(!pressed) lcd.fillRoundRect(bx+3,by+3,BTN_W,BTN_H,RADIUS,lcd.color565(20,20,20));
+  if(!pressed)lcd.fillRoundRect(bx+3,by+3,BTN_W,BTN_H,RADIUS,lcd.color565(20,20,20));
   lcd.fillRoundRect(bx,by+yOff,BTN_W,BTN_H,RADIUS,color);
   drawBorder(bx,by+yOff,BTN_W,BTN_H,buttons[idx].borderStyle,r,g,b);
   int cx=bx+BTN_W/2;
   if(hasIcon[idx]&&iconData[idx]){
-    int sz=iconPixelSize[idx], ix=cx-sz/2;
+    int sz=iconPixelSize[idx],ix=cx-sz/2;
     if(buttons[idx].showLabel){
       lcd.pushImage(ix,by+yOff+(BTN_H/2)-sz/2-10,sz,sz,iconData[idx]);
-      lcd.setTextColor(TFT_WHITE); lcd.setTextDatum(middle_center); lcd.setFont(&fonts::Font2);
+      lcd.setTextColor(TFT_WHITE);lcd.setTextDatum(middle_center);lcd.setFont(&fonts::Font2);
       lcd.drawString(buttons[idx].label,cx,by+yOff+BTN_H-20);
-    } else lcd.pushImage(ix,by+yOff+(BTN_H-sz)/2,sz,sz,iconData[idx]);
-  } else if(buttons[idx].showLabel){
-    lcd.setTextColor(TFT_WHITE); lcd.setTextDatum(middle_center); lcd.setFont(&fonts::Font4);
-    lcd.drawString(buttons[idx].label,cx,by+yOff+BTN_H/2);
-  }
-}
-void drawAll() { lcd.fillScreen(TFT_BLACK); for(int i=0;i<NUM_BUTTONS;i++) drawButton(i,false); drawSidebar(); }
-int hitTest(int32_t tx, int32_t ty) {
+    }else lcd.pushImage(ix,by+yOff+(BTN_H-sz)/2,sz,sz,iconData[idx]);
+  }else if(buttons[idx].showLabel){
+    lcd.setTextColor(TFT_WHITE);lcd.setTextDatum(middle_center);lcd.setFont(&fonts::Font4);
+    lcd.drawString(buttons[idx].label,cx,by+yOff+BTN_H/2);}}
+
+void drawAll(){lcd.fillScreen(TFT_BLACK);for(int i=0;i<NUM_BUTTONS;i++)drawButton(i,false);drawSidebar();}
+int hitTest(int32_t tx,int32_t ty){
   if(tx>=SB_X)return -1;
-  for(int i=0;i<NUM_BUTTONS;i++){int bx,by; getBtnRect(i,bx,by); if(tx>=bx&&tx<=bx+BTN_W&&ty>=by&&ty<=by+BTN_H)return i;}
-  return -1;
-}
+  for(int i=0;i<NUM_BUTTONS;i++){int bx,by;getBtnRect(i,bx,by);if(tx>=bx&&tx<=bx+BTN_W&&ty>=by&&ty<=by+BTN_H)return i;}
+  return -1;}
 
-// ─── Setup Screen ───
-void drawSetupScreen() {
-  lcd.fillScreen(lcd.color565(15,15,30));
-  lcd.setTextDatum(middle_center);
+// ─── BLE Config Protocol ───
+// Commands received via BLE Write characteristic:
+// GETALL → returns all button configs
+// SET:N:json → set button N config
+// ICON:N:size:base64 → set icon for button N
 
-  // Title
-  lcd.setTextColor(lcd.color565(100,126,234)); lcd.setFont(&fonts::Font4);
-  lcd.drawString("DIY Stream Deck",400,35);
-  lcd.setTextColor(lcd.color565(140,140,160)); lcd.setFont(&fonts::Font2);
-  lcd.drawString("by Bits y Tornillos",400,62);
+String bleResponse = "";
 
-  // Main card
-  lcd.fillRoundRect(40,85,720,310,16,lcd.color565(25,30,50));
-  lcd.drawRoundRect(40,85,720,310,16,lcd.color565(60,60,80));
-
-  // GitHub icon (simple)
-  int gx=400, gy=125;
-  lcd.fillCircle(gx,gy,18,TFT_WHITE);
-  lcd.fillCircle(gx,gy,15,lcd.color565(25,30,50));
-  lcd.fillCircle(gx,gy,12,TFT_WHITE);
-  lcd.fillRect(gx-6,gy,12,14,TFT_WHITE);
-  lcd.fillCircle(gx,gy+3,7,lcd.color565(25,30,50));
-
-  // Instructions
-  lcd.setTextColor(lcd.color565(200,200,220)); lcd.setFont(&fonts::Font4);
-  lcd.drawString("Descarga la app desde:",400,168);
-
-  // URL box
-  lcd.fillRoundRect(100,190,600,50,10,lcd.color565(15,20,35));
-  lcd.drawRoundRect(100,190,600,50,10,lcd.color565(100,126,234));
-  lcd.setTextColor(lcd.color565(100,200,255)); lcd.setFont(&fonts::Font4);
-  lcd.drawString("github.com/sintex85/diy-streamdeck",400,215);
-
-  // Steps
-  int sy = 260;
-  lcd.setFont(&fonts::Font2);
-
-  lcd.fillCircle(90,sy,12,lcd.color565(100,126,234));
-  lcd.setTextColor(TFT_WHITE); lcd.drawString("1",90,sy);
-  lcd.setTextDatum(middle_left); lcd.setTextColor(lcd.color565(200,200,210));
-  lcd.drawString("Descarga los archivos (boton verde 'Code' > Download ZIP)",112,sy);
-  sy += 35;
-
-  lcd.setTextDatum(middle_center);
-  lcd.fillCircle(90,sy,12,lcd.color565(100,126,234));
-  lcd.setTextColor(TFT_WHITE); lcd.drawString("2",90,sy);
-  lcd.setTextDatum(middle_left); lcd.setTextColor(lcd.color565(200,200,210));
-  lcd.drawString("Ejecuta 'Instalar' (doble-click, solo una vez)",112,sy);
-  sy += 35;
-
-  lcd.setTextDatum(middle_center);
-  lcd.fillCircle(90,sy,12,lcd.color565(46,204,113));
-  lcd.setTextColor(TFT_WHITE); lcd.drawString("3",90,sy);
-  lcd.setTextDatum(middle_left); lcd.setTextColor(lcd.color565(200,200,210));
-  lcd.drawString("Ejecuta 'Stream Deck' y activa auto-arranque. Listo!",112,sy);
-
-  // Footer
-  lcd.setTextDatum(middle_center);
-  lcd.setTextColor(lcd.color565(70,70,90)); lcd.setFont(&fonts::Font2);
-  lcd.drawString("Esperando conexion con el PC...",400,430);
-
-  setupShown = true;
-}
-
-void drawWaitingDots() {
-  static int frame=0;
-  for(int i=0;i<3;i++){
-    bool on=((frame/10)%3)==i;
-    lcd.fillCircle(384+i*16,455,4,on?lcd.color565(100,126,234):lcd.color565(30,30,50));
-  }
-  frame++;
-}
-
-// ─── Serial ───
-// Use pre-allocated buffer for large icon transfers (up to 12KB)
-static char cmdBuf[14000];
-static int cmdLen = 0;
-// Helper: find char in buffer from offset
-int bufFind(char ch, int from) {
-  for(int i=from; i<cmdLen; i++) if(cmdBuf[i]==ch) return i;
-  return -1;
-}
-// Helper: extract int from buffer range
-int bufInt(int from, int to) {
-  char tmp[12]; int len=min(to-from,11);
-  memcpy(tmp,cmdBuf+from,len); tmp[len]=0;
-  return atoi(tmp);
-}
-
-void processCommand() {
-  // Trim trailing whitespace
-  while(cmdLen>0 && (cmdBuf[cmdLen-1]==' '||cmdBuf[cmdLen-1]=='\t')) cmdLen--;
-  cmdBuf[cmdLen]=0;
-  lastSerialTime=millis();
-
-  if(cmdLen==0) return;
-
-  if(strcmp(cmdBuf,"PING")==0){
-    if(!pcConnected){pcConnected=true; if(!setupShown) drawSidebar();}
-    Serial.println("PONG"); return;
-  }
-
-  if(strncmp(cmdBuf,"SET:",4)==0){
-    int p2=bufFind(':',4); if(p2<0)return;
-    int p3=bufFind(':',p2+1); if(p3<0)return;
-    int idx=bufInt(4,p2); if(idx<0||idx>=NUM_BUTTONS)return;
-    // Label
-    int labelLen=min(p3-p2-1,19);
-    memcpy(buttons[idx].label, cmdBuf+p2+1, labelLen);
-    buttons[idx].label[labelLen]=0;
-    // Color: R,G,B
-    int c1=bufFind(',',p3+1); int c2=bufFind(',',c1+1);
-    if(c1<0||c2<0)return;
-    int nc=bufFind(':',c2+1); // optional style params
-    int colorEnd=(nc>=0)?nc:cmdLen;
-    buttons[idx].r=bufInt(p3+1,c1);
-    buttons[idx].g=bufInt(c1+1,c2);
-    buttons[idx].b=bufInt(c2+1,colorEnd);
-    // Style params: iconSize,borderStyle,showLabel
-    if(nc>=0){
-      int s1=bufFind(',',nc+1); int s2=bufFind(',',s1+1);
-      if(s1>=0&&s2>=0){
-        buttons[idx].iconSizeIdx=constrain(bufInt(nc+1,s1),0,3);
-        buttons[idx].borderStyle=constrain(bufInt(s1+1,s2),0,3);
-        buttons[idx].showLabel=bufInt(s2+1,cmdLen)!=0;
-      }
+void processBLECommand(const String &cmd) {
+  if(cmd == "GETALL") {
+    String json = "[";
+    for(int i=0;i<NUM_BUTTONS;i++){
+      if(i)json+=",";
+      json+="{\"i\":"+String(i)+",\"l\":\""+buttons[i].label+"\",\"r\":"+buttons[i].r+
+        ",\"g\":"+buttons[i].g+",\"b\":"+buttons[i].b+
+        ",\"a\":\""+buttons[i].action+"\",\"y\":"+buttons[i].actionType+
+        ",\"z\":"+buttons[i].iconSizeIdx+",\"d\":"+buttons[i].borderStyle+
+        ",\"t\":"+(buttons[i].showLabel?"1":"0")+"}";
     }
-    saveConfig(); drawButton(idx,false); Serial.println("OK");
+    json+="]";
+    // Send in chunks via notify (BLE MTU limit ~500 bytes)
+    bleResponse = json;
+    return;
   }
-  else if(strncmp(cmdBuf,"ICON:",5)==0){
-    int p2=bufFind(':',5); if(p2<0)return;
-    int p3=bufFind(':',p2+1); if(p3<0)return;
-    int idx=bufInt(5,p2); if(idx<0||idx>=NUM_BUTTONS)return;
-    int ps=bufInt(p2+1,p3); if(ps<16||ps>64)return;
+
+  if(cmd.startsWith("SET:")) {
+    int colon = cmd.indexOf(':',4);
+    if(colon<0)return;
+    int idx = cmd.substring(4,colon).toInt();
+    if(idx<0||idx>=NUM_BUTTONS)return;
+    String json = cmd.substring(colon+1);
+
+    // Simple JSON parse
+    auto getStr=[&](const char*key)->String{
+      String k="\""+String(key)+"\":\"";int s=json.indexOf(k);if(s<0)return"";
+      s+=k.length();int e=json.indexOf("\"",s);return json.substring(s,e);};
+    auto getInt=[&](const char*key)->int{
+      String k="\""+String(key)+"\":";int s=json.indexOf(k);if(s<0)return 0;
+      return json.substring(s+k.length()).toInt();};
+
+    String label=getStr("l"); if(label.length()>0){strncpy(buttons[idx].label,label.c_str(),19);buttons[idx].label[19]='\0';}
+    buttons[idx].r=getInt("r"); buttons[idx].g=getInt("g"); buttons[idx].b=getInt("b");
+    String action=getStr("a"); strncpy(buttons[idx].action,action.c_str(),127);buttons[idx].action[127]='\0';
+    buttons[idx].actionType=getInt("y");
+    buttons[idx].iconSizeIdx=constrain(getInt("z"),0,3);
+    buttons[idx].borderStyle=constrain(getInt("d"),0,3);
+    buttons[idx].showLabel=getInt("t")!=0;
+
+    saveConfig();
+    drawButton(idx,false);
+    bleResponse = "OK";
+  }
+
+  if(cmd.startsWith("ICON:")) {
+    int p2=cmd.indexOf(':',5); if(p2<0)return;
+    int p3=cmd.indexOf(':',p2+1); if(p3<0)return;
+    int idx=cmd.substring(5,p2).toInt();
+    if(idx<0||idx>=NUM_BUTTONS)return;
+    int ps=cmd.substring(p2+1,p3).toInt();
+    if(ps<16||ps>64)return;
     int eb=ps*ps*2;
-    Serial.printf("ICON_RX:%d:%d:%d\n", idx, ps, cmdLen-p3-1);
     if(iconData[idx])free(iconData[idx]);
     iconData[idx]=(uint16_t*)ps_malloc(eb);
-    if(!iconData[idx]){Serial.println("ERR:NOMEM");return;}
-    int d=base64_decode(cmdBuf+p3+1, cmdLen-p3-1, (uint8_t*)iconData[idx], eb);
-    if(d>=eb){hasIcon[idx]=true;iconPixelSize[idx]=ps;drawButton(idx,false);Serial.println("OK");}
-    else{hasIcon[idx]=false;Serial.printf("ERR:DECODE:%d/%d\n",d,eb);}
+    if(!iconData[idx]){bleResponse="ERR:MEM";return;}
+    int d=base64_decode(cmd.c_str()+p3+1,cmd.length()-p3-1,(uint8_t*)iconData[idx],eb);
+    if(d>=eb){hasIcon[idx]=true;iconPixelSize[idx]=ps;drawButton(idx,false);bleResponse="OK";}
+    else{hasIcon[idx]=false;bleResponse="ERR:DEC";}
   }
-  else if(strncmp(cmdBuf,"NOICON:",7)==0){
-    int idx=atoi(cmdBuf+7);
-    if(idx>=0&&idx<NUM_BUTTONS){hasIcon[idx]=false;drawButton(idx,false);Serial.println("OK");}
-  }
-  else if(strcmp(cmdBuf,"GETALL")==0){
-    for(int i=0;i<NUM_BUTTONS;i++)
-      Serial.printf("CFG:%d:%s:%d,%d,%d:%d:%d,%d,%d\n",i,buttons[i].label,buttons[i].r,buttons[i].g,buttons[i].b,
-        hasIcon[i]?1:0,buttons[i].iconSizeIdx,buttons[i].borderStyle,buttons[i].showLabel?1:0);
-    Serial.println("END");
-  }
-  else if(strcmp(cmdBuf,"RESETALL")==0){
-    for(int i=0;i<NUM_BUTTONS;i++){
-      strncpy(buttons[i].label,defaultLabels[i],19);
-      buttons[i].r=defaultColors[i][0];buttons[i].g=defaultColors[i][1];buttons[i].b=defaultColors[i][2];
-      buttons[i].iconSizeIdx=1;buttons[i].borderStyle=0;buttons[i].showLabel=true;hasIcon[i]=false;}
-    saveConfig();drawAll();Serial.println("OK");
+
+  if(cmd.startsWith("NOICON:")) {
+    int idx=cmd.substring(7).toInt();
+    if(idx>=0&&idx<NUM_BUTTONS){hasIcon[idx]=false;drawButton(idx,false);}
+    bleResponse="OK";
   }
 }
 
-void handleSerial(){
-  while(Serial.available()){
-    char c=Serial.read();
-    if(c=='\n'){
-      processCommand();
-      cmdLen=0;
-    } else if(c!='\r' && cmdLen<(int)sizeof(cmdBuf)-1){
-      cmdBuf[cmdLen++]=c;
+// BLE write buffer for multi-packet commands
+String bleWriteBuffer = "";
+
+class ConfigWriteCallback : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pChar) {
+    std::string val = pChar->getValue();
+    String chunk = String(val.c_str());
+
+    // Check if this is end of command (newline terminated)
+    if(chunk.indexOf('\n') >= 0) {
+      bleWriteBuffer += chunk.substring(0, chunk.indexOf('\n'));
+      bleWriteBuffer.trim();
+      Serial.printf("[BLE] Cmd: %s (%d chars)\n", bleWriteBuffer.substring(0,40).c_str(), bleWriteBuffer.length());
+      processBLECommand(bleWriteBuffer);
+      bleWriteBuffer = "";
+    } else {
+      bleWriteBuffer += chunk;
     }
   }
+};
+
+void setupBLEConfig() {
+  // Get the BLE server created by BleKeyboard
+  BLEServer *pServer = BLEDevice::createServer();
+
+  // Create config service
+  BLEService *pService = pServer->createService(CONFIG_SERVICE_UUID);
+
+  // Write characteristic (receive commands from browser)
+  pConfigWrite = pService->createCharacteristic(
+    CONFIG_CHAR_WRITE_UUID,
+    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
+  );
+  pConfigWrite->setCallbacks(new ConfigWriteCallback());
+
+  // Read/Notify characteristic (send responses to browser)
+  pConfigRead = pService->createCharacteristic(
+    CONFIG_CHAR_READ_UUID,
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+  );
+  pConfigRead->addDescriptor(new BLE2902());
+
+  pService->start();
+  bleConfigReady = true;
+  Serial.println("[BLE] Config service ready");
 }
 
 // ─── Main ───
 void setup() {
-  Serial.begin(115200); Serial.setRxBufferSize(16384);
+  Serial.begin(115200);
+  delay(500);
+  Serial.println("[BOOT] Starting...");
+
   lcd.init(); lcd.setRotation(0);
-  for(int i=0;i<NUM_BUTTONS;i++){iconData[i]=NULL;hasIcon[i]=false;iconPixelSize[i]=32;}
-  loadConfig(); lcd.setBrightness(brightness); drawAll();
+  for(int i=0;i<NUM_BUTTONS;i++){iconData[i]=NULL;hasIcon[i]=false;iconPixelSize[i]=32;
+    buttons[i].action[0]='\0';buttons[i].actionType=0;}
+
+  loadConfig();
+  lcd.setBrightness(brightness);
+  drawAll();
+
+  // Start BLE Keyboard
+  Serial.println("[BOOT] Starting BLE...");
+  bleKb.begin();
+
+  // Add config service on top of HID
+  delay(200);
+  setupBLEConfig();
+
+  // Update advertising to include config service
+  BLEAdvertising *pAdv = BLEDevice::getAdvertising();
+  pAdv->addServiceUUID(CONFIG_SERVICE_UUID);
+  pAdv->start();
+
+  Serial.println("[BOOT] Ready! Pair 'StreamDeck' via Bluetooth");
 }
 
 void loop() {
-  handleSerial();
-
-  if(pcConnected && millis()-lastSerialTime>5000){pcConnected=false; if(!setupShown) drawSidebar();}
-
-  // Show setup after 8s without PC
-  if(!everConnected && !pcConnected && millis()>8000 && !setupShown) drawSetupScreen();
-  if(setupShown && !pcConnected) drawWaitingDots();
-
-  // PC connected -> switch to deck
-  if(pcConnected && !everConnected){ everConnected=true; if(setupShown){setupShown=false; drawAll();} }
-  if(pcConnected && setupShown){setupShown=false; drawAll();}
-
-  int32_t tx,ty; bool touched=lcd.getTouch(&tx,&ty);
-  if(touched && activeButton==-1 && activeSidebar==-1 && !setupShown){
-    int sb=sidebarHitTest(tx,ty);
-    if(sb>=0){activeSidebar=sb; handleSidebarTouch(sb);}
-    else if(!locked){int hit=hitTest(tx,ty);
-      if(hit>=0){activeButton=hit; drawButton(hit,true); Serial.printf("BTN:%d\n",hit);}}
+  // Send BLE responses in chunks
+  if(bleResponse.length() > 0 && pConfigRead) {
+    int mtu = 500;  // Safe BLE chunk size
+    int sent = 0;
+    while(sent < bleResponse.length()) {
+      int chunkLen = min(mtu, (int)bleResponse.length() - sent);
+      pConfigRead->setValue(bleResponse.substring(sent, sent+chunkLen).c_str());
+      pConfigRead->notify();
+      sent += chunkLen;
+      if(sent < bleResponse.length()) delay(20);
+    }
+    bleResponse = "";
   }
-  if(!touched){if(activeButton>=0){drawButton(activeButton,false);activeButton=-1;} activeSidebar=-1;}
-  delay(20);
+
+  // Update BLE status
+  static bool lastBle = false;
+  bool curBle = bleKb.isConnected();
+  if(curBle!=lastBle){lastBle=curBle;drawSidebar();}
+
+  // Touch
+  int32_t tx,ty;bool touched=lcd.getTouch(&tx,&ty);
+  if(touched&&activeButton==-1&&activeSidebar==-1){
+    int sb=sidebarHitTest(tx,ty);
+    if(sb>=0){activeSidebar=sb;handleSidebarTouch(sb);}
+    else if(!locked){int hit=hitTest(tx,ty);
+      if(hit>=0){activeButton=hit;drawButton(hit,true);executeAction(hit);}}}
+  if(!touched){if(activeButton>=0){drawButton(activeButton,false);activeButton=-1;}activeSidebar=-1;}
+  delay(10);
 }

@@ -7,97 +7,74 @@ echo     DIY Stream Deck - Instalador
 echo   ===================================
 echo.
 
-:: Check if running from inside a ZIP
+:: Check files exist
 if not exist "%~dp0streamdeck_app.py" (
-    echo   [X] Estas ejecutando desde dentro del ZIP!
+    echo   [X] No se encuentra streamdeck_app.py
     echo.
-    echo   1. Haz click derecho en el archivo .zip
-    echo   2. Selecciona "Extraer todo..."
-    echo   3. Abre la carpeta extraida
-    echo   4. Ejecuta "Instalar.bat" desde ahi
+    echo   Si descargaste un ZIP:
+    echo   1. Click derecho en el .zip
+    echo   2. "Extraer todo..."
+    echo   3. Entra en la carpeta extraida
+    echo   4. Ejecuta este .bat desde ahi
+    echo.
+    echo   Carpeta actual: %~dp0
     echo.
     pause
     exit /b 1
 )
 
-:: Check Python (avoid Windows Store alias)
-where python >nul 2>&1
-if %errorlevel% neq 0 goto nopython
+:: Check Python
+python -c "import sys" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo   [X] Python no encontrado.
+    echo.
+    echo   1. Ve a https://www.python.org/downloads/
+    echo   2. Descarga Python 3
+    echo   3. MARCA "Add Python to PATH" al instalar
+    echo   4. Vuelve a ejecutar este instalador
+    echo.
+    start https://www.python.org/downloads/
+    pause
+    exit /b 1
+)
 
-python --version >nul 2>&1
-if %errorlevel% neq 0 goto nopython
+for /f "tokens=*" %%i in ('python --version 2^>^&1') do echo   [OK] %%i
 
-:: Verify it's real Python, not the Store alias
-python -c "import sys; sys.exit(0)" >nul 2>&1
-if %errorlevel% neq 0 goto nopython
-
-for /f "tokens=*" %%i in ('python --version 2^>^&1') do echo   [OK] %%i encontrado
-goto haspython
-
-:nopython
-echo   [X] Python no encontrado.
-echo.
-echo   IMPORTANTE:
-echo   1. Ve a https://www.python.org/downloads/
-echo   2. Descarga Python 3
-echo   3. Al instalar, MARCA la casilla "Add Python to PATH"
-echo   4. Despues vuelve a ejecutar este instalador
-echo.
-echo   Abriendo la web de descarga...
-start https://www.python.org/downloads/
-pause
-exit /b 1
-
-:haspython
 echo.
 echo   Instalando dependencias...
-python -m pip install --user pyserial Pillow
-if %errorlevel% neq 0 (
-    echo   [X] Error instalando dependencias
-    echo   Intenta: python -m pip install pyserial Pillow
-    pause
-    exit /b 1
-)
+python -m pip install pyserial Pillow
 
+echo.
 python -c "import serial" >nul 2>&1
 if %errorlevel% equ 0 (
     echo   [OK] pyserial instalado
 ) else (
-    echo   [X] Error con pyserial
+    echo   [X] Error instalando pyserial
     pause
     exit /b 1
 )
 
 python -c "from PIL import Image" >nul 2>&1
 if %errorlevel% equ 0 (
-    echo   [OK] Pillow instalado (iconos activados)
+    echo   [OK] Pillow instalado
 ) else (
     echo   [!] Pillow no instalado (sin iconos)
 )
 
 echo.
 echo   -------------------------------------------
-echo   IMPORTANTE: Driver USB
-echo.
-echo   Si el Stream Deck no se detecta, instala
-echo   el driver CH340 de:
+echo   NOTA: Si el Stream Deck no se detecta,
+echo   instala el driver CH340:
 echo   https://www.wch.cn/downloads/CH341SER_EXE.html
 echo   -------------------------------------------
 echo.
-echo   [OK] Dependencias instaladas!
-echo.
-echo   Quieres que se abra automaticamente
-echo   al conectar el Stream Deck por USB?
-echo.
-set /p AUTOSTART="  Activar auto-arranque? (s/n): "
 
+set /p AUTOSTART="  Activar auto-arranque? (s/n): "
 if /i "%AUTOSTART%"=="s" (
     python streamdeck_app.py --install
-    echo.
 )
 
-echo   [OK] Instalacion completada!
 echo.
-echo   Ahora haz doble-click en "Stream Deck.bat"
+echo   [OK] Listo! Ejecuta "Stream Deck.bat"
 echo.
 pause

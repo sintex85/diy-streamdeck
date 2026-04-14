@@ -1,0 +1,14 @@
+.claude/
+icons/
+__pycache__/
+*.pyc
+streamdeck_config.json
+dist/
+build/
+*.spec
+.DS_Store
+node_modules/
+.pio/
+.vscode/
+i2c_scan/
+streamdeck_listener.py

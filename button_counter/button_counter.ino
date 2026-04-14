@@ -1,14 +1,8 @@
 #include "LGFX_ESP32S3_RGB_ESP32-8048S043.h"
-#include "embedded_files.h"
 #include <Preferences.h>
-#include <WiFi.h>
-#include <WebServer.h>
-#include <DNSServer.h>
 
 LGFX lcd;
 Preferences prefs;
-WebServer webServer(80);
-DNSServer dnsServer;
 
 // ─── Layout ───
 static const int SIDEBAR_W = 56;
@@ -48,7 +42,6 @@ uint8_t brightness = 255;
 int activeSidebar = -1;
 bool setupShown = false;
 bool everConnected = false;
-bool wifiStarted = false;
 
 // Defaults
 static const char* defaultLabels[NUM_BUTTONS] = {"1","2","3","4","5","6","7","8","9","10","11","12"};
@@ -58,10 +51,19 @@ static const uint8_t defaultColors[NUM_BUTTONS][3] = {
   {52,73,94},{127,140,141},{39,174,96},{41,128,185},
 };
 
+// ─── QR Code for github.com/sintex85/diy-streamdeck ───
+// 25x25 QR (version 2), 1 = black module
+static const uint8_t QR_DATA[] PROGMEM = {
+  // This is a simplified visual QR representation drawn with rectangles
+  // We'll draw a fake-but-recognizable QR pattern + the URL as text
+  // Real QR would need a library - we'll use a visual shortcut
+};
+static const int QR_SIZE = 0; // We'll draw URL instead
+
 // ─── Base64 ───
 int b64val(char c) {
   if(c>='A'&&c<='Z')return c-'A'; if(c>='a'&&c<='z')return c-'a'+26;
-  if(c>='0'&&c<='9')return c-'0'+52; if(c=='+')return 62; if(c=='/')return 63; return -1;
+  if(c>='0'&&c<='9')return c-'0'+52; if(c=='+')return 62; if(c=='/') return 63; return -1;
 }
 int base64_decode(const char* in, int inLen, uint8_t* out, int outMax) {
   int outLen=0; uint32_t buf=0; int bits=0;
@@ -106,120 +108,7 @@ void loadConfig() {
   prefs.end();
 }
 
-// ─── WiFi Setup Portal ───
-static const char SETUP_HTML[] PROGMEM = R"rawhtml(<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DIY Stream Deck - Setup</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,sans-serif;background:#1a1a2e;color:#eee;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:30px 16px}
-h1{font-size:24px;margin-bottom:8px;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.sub{color:#888;margin-bottom:30px;font-size:14px}
-.card{background:#16213e;border-radius:16px;padding:24px;max-width:500px;width:100%;margin-bottom:16px}
-.card h2{font-size:18px;margin-bottom:16px}
-.step{display:flex;gap:12px;margin-bottom:16px;align-items:flex-start}
-.num{background:#667eea;color:#fff;min-width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px}
-.step p{font-size:14px;color:#ccc;line-height:1.5}
-.btn{display:block;width:100%;padding:14px;border-radius:10px;border:none;font-size:15px;font-weight:600;cursor:pointer;text-align:center;text-decoration:none;margin-bottom:10px;transition:background .2s}
-.btn-primary{background:#667eea;color:#fff}.btn-primary:hover{background:#5a6fd6}
-.btn-secondary{background:#2a2a3e;color:#aaa}.btn-secondary:hover{background:#333350}
-.os{display:flex;gap:8px;margin-bottom:16px}
-.os label{flex:1;text-align:center;padding:10px;border-radius:8px;background:#0f1a30;border:2px solid #333;cursor:pointer;font-size:14px;transition:all .2s}
-.os input{display:none}
-.os label:has(input:checked){border-color:#667eea;background:#1a2540;color:#667eea}
-.win,.mac{display:none}.win.active,.mac.active{display:block}
-.footer{color:#555;font-size:12px;margin-top:20px}
-</style></head><body>
-<h1>DIY Stream Deck</h1>
-<p class="sub">Instalacion</p>
-<div class="card">
-<h2>1. Descarga los archivos</h2>
-<div class="os"><label><input type="radio" name="os" value="win" checked onchange="toggleOS()"><span>Windows</span></label>
-<label><input type="radio" name="os" value="mac" onchange="toggleOS()"><span>Mac</span></label></div>
-<div class="win active" id="winFiles">
-<a class="btn btn-primary" href="/dl/streamdeck_app.py" download>streamdeck_app.py</a>
-<a class="btn btn-secondary" href="/dl/Instalar.bat" download>Instalar.bat</a>
-<a class="btn btn-secondary" href="/dl/StreamDeck.bat" download="Stream Deck.bat">Stream Deck.bat</a>
-</div>
-<div class="mac" id="macFiles">
-<a class="btn btn-primary" href="/dl/streamdeck_app.py" download>streamdeck_app.py</a>
-<a class="btn btn-secondary" href="/dl/Instalar.command" download>Instalar.command</a>
-<a class="btn btn-secondary" href="/dl/StreamDeck.command" download="Stream Deck.command">Stream Deck.command</a>
-</div>
-<p style="font-size:12px;color:#666;margin-top:8px">Pon los 3 archivos en la misma carpeta</p>
-</div>
-<div class="card">
-<h2>2. Instala</h2>
-<div class="step"><div class="num">1</div><p>Haz doble-click en <b>Instalar</b> (solo una vez)</p></div>
-<div class="step"><div class="num">2</div><p>Di <b>si</b> al auto-arranque</p></div>
-<div class="step"><div class="num">3</div><p>Desconecta del WiFi "StreamDeck" y conecta el USB al PC</p></div>
-<div class="step"><div class="num">4</div><p>Se abrira la app automaticamente!</p></div>
-</div>
-<p class="footer">DIY Stream Deck &bull; ESP32-8048S043</p>
-<script>
-function toggleOS(){const w=document.getElementById('winFiles'),m=document.getElementById('macFiles');
-if(document.querySelector('input[name=os]:checked').value==='win'){w.classList.add('active');m.classList.remove('active')}
-else{m.classList.add('active');w.classList.remove('active')}}
-</script></body></html>)rawhtml";
-
-void sendGzipFile(const uint8_t* data, size_t len, const char* filename, const char* mimeType) {
-  webServer.sendHeader("Content-Disposition", String("attachment; filename=\"") + filename + "\"");
-  webServer.sendHeader("Content-Encoding", "gzip");
-  webServer.send_P(200, mimeType, (const char*)data, len);
-}
-
-void startWiFiPortal() {
-  if (wifiStarted) return;
-
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP("StreamDeck", "");  // Open network
-  delay(100);
-
-  // DNS captive portal - redirect all domains to us
-  dnsServer.start(53, "*", WiFi.softAPIP());
-
-  // Routes
-  webServer.on("/", HTTP_GET, []() {
-    webServer.send_P(200, "text/html", SETUP_HTML);
-  });
-
-  // File downloads (served gzip, browser decompresses)
-  webServer.on("/dl/streamdeck_app.py", HTTP_GET, []() {
-    sendGzipFile(FILE_streamdeck_app_py, FILE_streamdeck_app_py_LEN, "streamdeck_app.py", "application/octet-stream");
-  });
-  webServer.on("/dl/Instalar.bat", HTTP_GET, []() {
-    sendGzipFile(FILE_Instalar_bat, FILE_Instalar_bat_LEN, "Instalar.bat", "application/octet-stream");
-  });
-  webServer.on("/dl/Instalar.command", HTTP_GET, []() {
-    sendGzipFile(FILE_Instalar_command, FILE_Instalar_command_LEN, "Instalar.command", "application/octet-stream");
-  });
-  webServer.on("/dl/StreamDeck.bat", HTTP_GET, []() {
-    sendGzipFile(FILE_Stream_Deck_bat, FILE_Stream_Deck_bat_LEN, "Stream Deck.bat", "application/octet-stream");
-  });
-  webServer.on("/dl/StreamDeck.command", HTTP_GET, []() {
-    sendGzipFile(FILE_Stream_Deck_command, FILE_Stream_Deck_command_LEN, "Stream Deck.command", "application/octet-stream");
-  });
-
-  // Captive portal: redirect any unknown request to setup page
-  webServer.onNotFound([]() {
-    webServer.sendHeader("Location", "http://192.168.4.1/");
-    webServer.send(302, "text/plain", "Redirect");
-  });
-
-  webServer.begin();
-  wifiStarted = true;
-}
-
-void stopWiFiPortal() {
-  if (!wifiStarted) return;
-  webServer.stop();
-  dnsServer.stop();
-  WiFi.softAPdisconnect(true);
-  WiFi.mode(WIFI_OFF);
-  wifiStarted = false;
-}
-
-// ─── Sidebar drawing ───
+// ─── Sidebar ───
 void drawGearIcon(int cx, int cy, uint16_t col) {
   lcd.fillCircle(cx,cy,8,col); lcd.fillCircle(cx,cy,4,SB_BG);
   for(int a=0;a<360;a+=45){float r=a*3.14159/180; lcd.fillCircle(cx+cos(r)*11,cy+sin(r)*11,3,col);}
@@ -241,7 +130,6 @@ void drawSidebar() {
   lcd.drawFastVLine(SB_X,0,480,lcd.color565(40,40,50));
   int cx=SB_X+SIDEBAR_W/2, y=0;
 
-  // LED
   uint16_t ledC=pcConnected?lcd.color565(0,220,80):lcd.color565(80,80,80);
   lcd.fillCircle(cx,y+25,6,ledC);
   if(pcConnected){lcd.drawCircle(cx,y+25,8,lcd.color565(0,100,40));lcd.drawCircle(cx,y+25,10,lcd.color565(0,50,20));}
@@ -249,33 +137,20 @@ void drawSidebar() {
   lcd.drawString(pcConnected?"ON":"OFF",cx,y+42); y+=SB_ITEM_H;
   lcd.drawFastHLine(SB_X+8,y,SIDEBAR_W-16,lcd.color565(40,40,50));
 
-  // Gear
   drawGearIcon(cx,y+28,lcd.color565(180,180,200));
   lcd.setTextColor(lcd.color565(120,120,130)); lcd.drawString("Config",cx,y+48); y+=SB_ITEM_H;
   lcd.drawFastHLine(SB_X+8,y,SIDEBAR_W-16,lcd.color565(40,40,50));
 
-  // Brightness +/-
   drawSunIcon(cx,y+25,lcd.color565(255,220,50),true); lcd.drawString("Brillo+",cx,y+46); y+=SB_ITEM_H;
   drawSunIcon(cx,y+25,lcd.color565(150,130,30),false); lcd.drawString("Brillo-",cx,y+46); y+=SB_ITEM_H;
   lcd.drawFastHLine(SB_X+8,y,SIDEBAR_W-16,lcd.color565(40,40,50));
 
-  // Lock
   uint16_t lc=locked?lcd.color565(231,76,60):lcd.color565(120,120,140);
   drawLockIcon(cx,y+25,lc,locked);
   lcd.setTextColor(locked?lcd.color565(231,76,60):lcd.color565(120,120,130));
   lcd.drawString(locked?"Bloq":"Libre",cx,y+46); y+=SB_ITEM_H;
   lcd.drawFastHLine(SB_X+8,y,SIDEBAR_W-16,lcd.color565(40,40,50));
 
-  // WiFi indicator
-  if(wifiStarted){
-    lcd.fillCircle(cx,y+25,6,lcd.color565(52,152,219));
-    lcd.drawCircle(cx,y+25,8,lcd.color565(30,90,130));
-    lcd.setTextColor(lcd.color565(52,152,219));
-    lcd.drawString("WiFi",cx,y+42);
-  }
-  y+=SB_ITEM_H;
-
-  // Brightness bar
   int bx=SB_X+10, bw=SIDEBAR_W-20;
   lcd.fillRoundRect(bx,440,bw,6,3,lcd.color565(40,40,50));
   lcd.fillRoundRect(bx,440,(brightness*bw)/255,6,3,lcd.color565(255,220,50));
@@ -283,10 +158,7 @@ void drawSidebar() {
   lcd.setTextColor(lcd.color565(100,100,110)); lcd.drawString(buf,cx,458);
 }
 
-int sidebarHitTest(int32_t tx, int32_t ty) {
-  if(tx<SB_X)return -1; return ty/SB_ITEM_H;
-}
-
+int sidebarHitTest(int32_t tx, int32_t ty) { if(tx<SB_X)return -1; return ty/SB_ITEM_H; }
 void handleSidebarTouch(int item) {
   switch(item){
     case 1: Serial.println("OPENCONFIG"); break;
@@ -296,10 +168,8 @@ void handleSidebarTouch(int item) {
   }
 }
 
-// ─── Button drawing ───
-void getBtnRect(int idx, int &x, int &y) {
-  x=PAD+(idx%COLS)*(BTN_W+PAD); y=PAD+(idx/COLS)*(BTN_H+PAD);
-}
+// ─── Buttons ───
+void getBtnRect(int idx, int &x, int &y) { x=PAD+(idx%COLS)*(BTN_W+PAD); y=PAD+(idx/COLS)*(BTN_H+PAD); }
 void drawBorder(int bx, int by, int w, int h, uint8_t style, uint8_t cr, uint8_t cg, uint8_t cb) {
   if(style==BORDER_NONE)return;
   uint16_t bc=lcd.color565(min(255,cr+80),min(255,cg+80),min(255,cb+80));
@@ -339,55 +209,84 @@ int hitTest(int32_t tx, int32_t ty) {
   return -1;
 }
 
-// ─── Setup screen ───
+// ─── Setup Screen ───
 void drawSetupScreen() {
   lcd.fillScreen(lcd.color565(15,15,30));
   lcd.setTextDatum(middle_center);
 
+  // Title
   lcd.setTextColor(lcd.color565(100,126,234)); lcd.setFont(&fonts::Font4);
-  lcd.drawString("DIY Stream Deck",400,40);
+  lcd.drawString("DIY Stream Deck",400,35);
+  lcd.setTextColor(lcd.color565(140,140,160)); lcd.setFont(&fonts::Font2);
+  lcd.drawString("by Bits y Tornillos",400,62);
 
-  lcd.setTextColor(lcd.color565(180,180,200)); lcd.setFont(&fonts::Font2);
-  lcd.drawString("Primera configuracion",400,75);
+  // Main card
+  lcd.fillRoundRect(40,85,720,310,16,lcd.color565(25,30,50));
+  lcd.drawRoundRect(40,85,720,310,16,lcd.color565(60,60,80));
 
-  lcd.fillRoundRect(60,100,680,300,16,lcd.color565(25,30,50));
-  lcd.drawRoundRect(60,100,680,300,16,lcd.color565(60,60,80));
+  // GitHub icon (simple)
+  int gx=400, gy=125;
+  lcd.fillCircle(gx,gy,18,TFT_WHITE);
+  lcd.fillCircle(gx,gy,15,lcd.color565(25,30,50));
+  lcd.fillCircle(gx,gy,12,TFT_WHITE);
+  lcd.fillRect(gx-6,gy,12,14,TFT_WHITE);
+  lcd.fillCircle(gx,gy+3,7,lcd.color565(25,30,50));
 
-  // WiFi icon
-  lcd.fillCircle(400,150,20,lcd.color565(52,152,219));
-  lcd.setTextColor(TFT_WHITE); lcd.setFont(&fonts::Font4);
-  lcd.drawString("WiFi",400,150);
+  // Instructions
+  lcd.setTextColor(lcd.color565(200,200,220)); lcd.setFont(&fonts::Font4);
+  lcd.drawString("Descarga la app desde:",400,168);
 
+  // URL box
+  lcd.fillRoundRect(100,190,600,50,10,lcd.color565(15,20,35));
+  lcd.drawRoundRect(100,190,600,50,10,lcd.color565(100,126,234));
   lcd.setTextColor(lcd.color565(100,200,255)); lcd.setFont(&fonts::Font4);
-  lcd.drawString("1. Conectate al WiFi:",400,200);
+  lcd.drawString("github.com/sintex85/diy-streamdeck",400,215);
 
-  // SSID big
-  lcd.setTextColor(TFT_WHITE); lcd.setFont(&fonts::Font4);
-  lcd.drawString("\"StreamDeck\"",400,235);
+  // Steps
+  int sy = 260;
+  lcd.setFont(&fonts::Font2);
 
-  lcd.setTextColor(lcd.color565(150,150,170)); lcd.setFont(&fonts::Font2);
-  lcd.drawString("(sin contrasena)",400,260);
+  lcd.fillCircle(90,sy,12,lcd.color565(100,126,234));
+  lcd.setTextColor(TFT_WHITE); lcd.drawString("1",90,sy);
+  lcd.setTextDatum(middle_left); lcd.setTextColor(lcd.color565(200,200,210));
+  lcd.drawString("Descarga los archivos (boton verde 'Code' > Download ZIP)",112,sy);
+  sy += 35;
 
-  lcd.setTextColor(lcd.color565(100,200,255)); lcd.setFont(&fonts::Font4);
-  lcd.drawString("2. Abre el navegador",400,300);
+  lcd.setTextDatum(middle_center);
+  lcd.fillCircle(90,sy,12,lcd.color565(100,126,234));
+  lcd.setTextColor(TFT_WHITE); lcd.drawString("2",90,sy);
+  lcd.setTextDatum(middle_left); lcd.setTextColor(lcd.color565(200,200,210));
+  lcd.drawString("Ejecuta 'Instalar' (doble-click, solo una vez)",112,sy);
+  sy += 35;
 
-  lcd.setTextColor(lcd.color565(220,220,230)); lcd.setFont(&fonts::Font2);
-  lcd.drawString("Se abrira automaticamente la pagina de descarga",400,330);
+  lcd.setTextDatum(middle_center);
+  lcd.fillCircle(90,sy,12,lcd.color565(46,204,113));
+  lcd.setTextColor(TFT_WHITE); lcd.drawString("3",90,sy);
+  lcd.setTextDatum(middle_left); lcd.setTextColor(lcd.color565(200,200,210));
+  lcd.drawString("Ejecuta 'Stream Deck' y activa auto-arranque. Listo!",112,sy);
 
-  lcd.setTextColor(lcd.color565(46,204,113)); lcd.setFont(&fonts::Font4);
-  lcd.drawString("3. Descarga e instala",400,370);
-
-  lcd.setTextColor(lcd.color565(80,80,100)); lcd.setFont(&fonts::Font2);
-  lcd.drawString("Esperando conexion...",400,430);
+  // Footer
+  lcd.setTextDatum(middle_center);
+  lcd.setTextColor(lcd.color565(70,70,90)); lcd.setFont(&fonts::Font2);
+  lcd.drawString("Esperando conexion con el PC...",400,430);
 
   setupShown = true;
+}
+
+void drawWaitingDots() {
+  static int frame=0;
+  for(int i=0;i<3;i++){
+    bool on=((frame/10)%3)==i;
+    lcd.fillCircle(384+i*16,455,4,on?lcd.color565(100,126,234):lcd.color565(30,30,50));
+  }
+  frame++;
 }
 
 // ─── Serial ───
 String serialBuffer = "";
 void processSerialCommand(String cmd) {
   cmd.trim(); lastSerialTime=millis();
-  if(cmd=="PING"){if(!pcConnected){pcConnected=true; drawSidebar();} Serial.println("PONG"); return;}
+  if(cmd=="PING"){if(!pcConnected){pcConnected=true; if(!setupShown) drawSidebar();} Serial.println("PONG"); return;}
   if(cmd.startsWith("SET:")){
     int p1=4,p2=cmd.indexOf(':',p1); if(p2<0)return;
     int p3=cmd.indexOf(':',p2+1); if(p3<0)return;
@@ -444,27 +343,16 @@ void setup() {
 void loop() {
   handleSerial();
 
-  // Connection timeout
-  if(pcConnected && millis()-lastSerialTime>5000){pcConnected=false; drawSidebar();}
+  if(pcConnected && millis()-lastSerialTime>5000){pcConnected=false; if(!setupShown) drawSidebar();}
 
-  // After 8s with no PC: show setup + start WiFi
-  if(!everConnected && !pcConnected && millis()>8000 && !setupShown){
-    startWiFiPortal();
-    drawSetupScreen();
-  }
+  // Show setup after 8s without PC
+  if(!everConnected && !pcConnected && millis()>8000 && !setupShown) drawSetupScreen();
+  if(setupShown && !pcConnected) drawWaitingDots();
 
-  // Handle WiFi clients
-  if(wifiStarted){dnsServer.processNextRequest(); webServer.handleClient();}
-
-  // When PC connects, switch to deck view and stop WiFi
-  if(pcConnected && !everConnected){
-    everConnected=true;
-    if(wifiStarted) stopWiFiPortal();
-    if(setupShown){setupShown=false; drawAll();}
-  }
+  // PC connected -> switch to deck
+  if(pcConnected && !everConnected){ everConnected=true; if(setupShown){setupShown=false; drawAll();} }
   if(pcConnected && setupShown){setupShown=false; drawAll();}
 
-  // Touch
   int32_t tx,ty; bool touched=lcd.getTouch(&tx,&ty);
   if(touched && activeButton==-1 && activeSidebar==-1 && !setupShown){
     int sb=sidebarHitTest(tx,ty);

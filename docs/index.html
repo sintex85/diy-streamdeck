@@ -149,9 +149,13 @@ async function readLoop(){
           const p=l.split(':');if(p.length>=4){
             const idx=+p[1],type=+p[2],action=p.slice(3).join(':');
             flashCard(idx);
-            if(type===1||type===3){
-              const a=document.createElement('a');a.href=action;a.target='_blank';a.rel='noopener';
-              document.body.appendChild(a);a.click();document.body.removeChild(a);
+            if(type===1){ // URL - open in new tab
+              window.open(action,'_blank');
+            } else if(type===3){ // App protocol - use location to trigger OS handler
+              const iframe=document.createElement('iframe');
+              iframe.style.display='none';iframe.src=action;
+              document.body.appendChild(iframe);
+              setTimeout(()=>document.body.removeChild(iframe),2000);
             }
           }
         }

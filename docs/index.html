@@ -255,7 +255,7 @@ async function sendIconForButton(idx,b){
   try{
     const u=new URL(b.action);
     // DuckDuckGo favicon API supports CORS
-    const url=`https://icons.duckduckgo.com/ip3/${u.hostname}.ico`;
+    const url=`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://www.google.com/s2/favicons?domain=${u.hostname}&sz=128`)}`;
     const resp=await fetch(url);
     if(!resp.ok)throw new Error('fetch failed');
     const blob=await resp.blob();

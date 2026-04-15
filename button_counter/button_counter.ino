@@ -163,26 +163,28 @@ void drawSidebar(){
   lcd.fillRect(SB_X,0,SIDEBAR_W,480,SB_BG);
   lcd.drawFastVLine(SB_X,0,480,lcd.color565(40,40,50));
   int cx=SB_X+SIDEBAR_W/2,y=0;
-  // BLE
+  // 0: BLE status
   bool conn=bleKb.isConnected();
   lcd.fillCircle(cx,y+25,6,conn?lcd.color565(0,150,255):lcd.color565(80,80,80));
   if(conn){lcd.drawCircle(cx,y+25,8,lcd.color565(0,70,130));lcd.drawCircle(cx,y+25,10,lcd.color565(0,35,65));}
   lcd.setTextColor(lcd.color565(120,120,130));lcd.setTextDatum(middle_center);lcd.setFont(&fonts::Font0);
   lcd.drawString(conn?"BT OK":"BT...",cx,y+42);y+=SB_ITEM_H;
   lcd.drawFastHLine(SB_X+8,y,SIDEBAR_W-16,lcd.color565(40,40,50));
-  // Brillo
+  // 1: Config gear
+  drawGearIcon(cx,y+25,lcd.color565(180,180,200));
+  lcd.setTextColor(lcd.color565(120,120,130));lcd.drawString("Config",cx,y+46);y+=SB_ITEM_H;
+  lcd.drawFastHLine(SB_X+8,y,SIDEBAR_W-16,lcd.color565(40,40,50));
+  // 2: Brillo+
   drawSunIcon(cx,y+25,lcd.color565(255,220,50),true);lcd.drawString("Brillo+",cx,y+46);y+=SB_ITEM_H;
+  // 3: Brillo-
   drawSunIcon(cx,y+25,lcd.color565(150,130,30),false);lcd.drawString("Brillo-",cx,y+46);y+=SB_ITEM_H;
   lcd.drawFastHLine(SB_X+8,y,SIDEBAR_W-16,lcd.color565(40,40,50));
-  // Lock
+  // 4: Lock
   uint16_t lc=locked?lcd.color565(231,76,60):lcd.color565(120,120,140);
   drawLockIcon(cx,y+25,lc,locked);
   lcd.setTextColor(locked?lcd.color565(231,76,60):lcd.color565(120,120,130));
   lcd.drawString(locked?"Bloq":"Libre",cx,y+46);y+=SB_ITEM_H;
   lcd.drawFastHLine(SB_X+8,y,SIDEBAR_W-16,lcd.color565(40,40,50));
-  // Info
-  lcd.setTextColor(lcd.color565(80,80,100));
-  lcd.drawString("Config:",cx,y+15);lcd.drawString("Chrome",cx,y+28);lcd.drawString("USB",cx,y+41);y+=SB_ITEM_H;
   // Brightness bar
   int bx=SB_X+10,bw=SIDEBAR_W-20;
   lcd.fillRoundRect(bx,440,bw,6,3,lcd.color565(40,40,50));
@@ -192,9 +194,14 @@ void drawSidebar(){
 
 int sidebarHitTest(int32_t tx,int32_t ty){if(tx<SB_X)return-1;return ty/SB_ITEM_H;}
 void handleSidebarTouch(int item){switch(item){
-  case 1:brightness=min(255,brightness+30);lcd.setBrightness(brightness);saveConfig();drawSidebar();break;
-  case 2:brightness=max(25,brightness-30);lcd.setBrightness(brightness);saveConfig();drawSidebar();break;
-  case 3:locked=!locked;drawSidebar();break;}}
+  case 0: // BLE status - no action
+    break;
+  case 1: // Config gear - send URL via serial for Chrome to open
+    Serial.println("BTN:99:1:https://sintex85.github.io/diy-streamdeck");
+    break;
+  case 2:brightness=min(255,brightness+30);lcd.setBrightness(brightness);saveConfig();drawSidebar();break;
+  case 3:brightness=max(25,brightness-30);lcd.setBrightness(brightness);saveConfig();drawSidebar();break;
+  case 4:locked=!locked;drawSidebar();break;}}
 
 // ─── Buttons ───
 void getBtnRect(int idx,int&x,int&y){x=PAD+(idx%COLS)*(BTN_W+PAD);y=PAD+(idx/COLS)*(BTN_H+PAD);}

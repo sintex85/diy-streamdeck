@@ -201,16 +201,45 @@ async function loadButtons(){
   render();
 }
 
+// Known app icons
+const appIcons={
+  'spotify:':'\u{1F3B5}','discord:':'\u{1F4AC}','slack:':'\u{1F4AC}',
+  'zoommtg:':'\u{1F4F9}','msteams:':'\u{1F4AC}','tg:':'\u{2708}',
+  'steam:':'\u{1F3AE}','mailto:':'\u{1F4E7}','file:':'\u{1F4C1}',
+  'tel:':'\u{1F4DE}','sms:':'\u{1F4AC}'};
+
+// Store uploaded icon data URLs for preview
+const uploadedIcons={};
+
+function getIconHtml(b){
+  // Uploaded icon preview
+  if(uploadedIcons[b.label]) return `<img src="${uploadedIcons[b.label]}" style="width:28px;height:28px;border-radius:6px">`;
+  // URL favicon
+  if(b.action && b.actionType===1){
+    try{const u=new URL(b.action);return `<img src="https://www.google.com/s2/favicons?domain=${u.hostname}&sz=64" style="width:28px;height:28px;border-radius:6px" onerror="this.style.display='none'">`;}catch(e){}
+  }
+  // App emoji
+  if(b.action && b.actionType===3){
+    const key=Object.keys(appIcons).find(k=>b.action.startsWith(k));
+    if(key) return `<span style="font-size:24px">${appIcons[key]}</span>`;
+  }
+  // Keyboard emoji
+  if(b.actionType===2 && b.action){
+    if(b.action.includes('vol')) return '<span style="font-size:24px">\u{1F50A}</span>';
+    if(b.action.includes('play')||b.action.includes('pause')) return '<span style="font-size:24px">\u23EF</span>';
+    if(b.action.includes('next')) return '<span style="font-size:24px">\u23ED</span>';
+    if(b.action.includes('prev')) return '<span style="font-size:24px">\u23EE</span>';
+    return '<span style="font-size:24px">\u2328</span>';
+  }
+  return '';
+}
+
 function render(){
   const g=document.getElementById('grid');g.innerHTML='';
   B.forEach((b,i)=>{if(!b)return;const d=document.createElement('div');d.className='btn-card';
     d.style.background=`rgb(${b.r},${b.g},${b.b})`;
     let h=b.action?(b.action.replace('https://','').replace('http://','').substring(0,25)):'';
-    let ico='';
-    if(b.action && b.actionType===1){
-      try{const u=new URL(b.action);ico=`<img src="https://www.google.com/s2/favicons?domain=${u.hostname}&sz=64" style="width:28px;height:28px;border-radius:6px" onerror="this.style.display='none'">`;}catch(e){}
-    }
-    d.innerHTML=`${ico}<span class="label">${b.label}</span><span class="hint">${h}</span>`;
+    d.innerHTML=`${getIconHtml(b)}<span class="label">${b.label}</span><span class="hint">${h}</span>`;
     d.onclick=()=>openModal(i);g.appendChild(d);});}
 
 function openModal(i){eI=i;const b=B[i];if(!b)return;
@@ -222,7 +251,7 @@ function openModal(i){eI=i;const b=B[i];if(!b)return;
   document.querySelector(`input[name=iSize][value="${b.iconSizeIdx||1}"]`).checked=true;
   document.querySelector(`input[name=bStyle][value="${b.borderStyle||0}"]`).checked=true;
   document.getElementById('eShowLabel').checked=b.showLabel!==false;
-  pendingIconFile=null;document.getElementById('eIconName').textContent='-';document.getElementById('eIcon').value='';
+  pendingIconFile=null;pendingIconPreview=null;document.getElementById('eIconName').textContent='-';document.getElementById('eIcon').value='';
   updHelp();document.getElementById('overlay').classList.add('active');}
 
 function closeModal(){document.getElementById('overlay').classList.remove('active');eI=-1;}
@@ -236,8 +265,9 @@ function updHelp(){
   const pb=document.getElementById('presetBox');
   const appPresets=[
     {i:"\u{1F3B5}",l:"Spotify",v:"spotify:"},{i:"\u{1F4AC}",l:"Discord",v:"discord:"},{i:"\u{1F4AC}",l:"Slack",v:"slack:"},
-    {i:"\u{1F4F9}",l:"Zoom",v:"zoommtg:"},{i:"\u{1F4AC}",l:"Teams",v:"msteams:"},{i:"\u{1F4AC}",l:"Telegram",v:"tg:"},
-    {i:"\u{1F3AE}",l:"Steam",v:"steam:"},{i:"\u{1F4E7}",l:"Mail",v:"mailto:"},{i:"\u{1F4C1}",l:"Finder",v:"file:///"}];
+    {i:"\u{1F4F9}",l:"Zoom",v:"zoommtg:"},{i:"\u{1F4AC}",l:"Teams",v:"msteams:"},{i:"\u{2708}",l:"Telegram",v:"tg:"},
+    {i:"\u{1F3AE}",l:"Steam",v:"steam://open/main"},{i:"\u{1F4E7}",l:"Mail",v:"mailto:"},{i:"\u{1F4C1}",l:"Archivos",v:"file:///"},
+    {i:"\u{1F3AC}",l:"Netflix",v:"https://www.netflix.com"},{i:"\u{1F4FA}",l:"YouTube",v:"https://www.youtube.com"},{i:"\u{1F6D2}",l:"Amazon",v:"https://www.amazon.es"}];
   if(t===2||t===3){pb.style.display='';const pg=document.getElementById('presets');pg.innerHTML='';
     const list=t===2?presets:appPresets;
     list.forEach(p=>{const d=document.createElement('div');d.className='preset';
@@ -250,6 +280,10 @@ document.getElementById('eIcon').addEventListener('change',function(e){
   const f=e.target.files[0];if(!f)return;
   pendingIconFile=f;
   document.getElementById('eIconName').textContent=f.name;
+  // Save preview for web display
+  const reader=new FileReader();
+  reader.onload=ev=>{pendingIconPreview=ev.target.result;};
+  reader.readAsDataURL(f);
 });
 document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeModal();});
 
@@ -314,6 +348,7 @@ async function sendIconToESP32(idx,file,bgR,bgG,bgB,sizeIdx){
   }catch(e){console.log('[ICON] Error:',e);toast('Error: '+e.message);}
 }
 let pendingIconFile=null;
+let pendingIconPreview=null;
 
 async function saveBtn(){
   const i=eI,c=hexRgb(document.getElementById('eColor').value);
@@ -327,11 +362,12 @@ async function saveBtn(){
   const iconFile=pendingIconFile;
   await sendWait(`SET:${i}:${b.label}:${b.r},${b.g},${b.b}:${b.iconSizeIdx},${b.borderStyle},${b.showLabel?1:0}`);
   await sendWait(`ACT:${i}:${b.actionType}:${b.action}`);
+  if(pendingIconPreview) uploadedIcons[b.label]=pendingIconPreview;
   B[i]=b;render();closeModal();
   if(iconFile){
     console.log('[SAVE] Sending icon file:',iconFile.name);
     await sendIconToESP32(i,iconFile,b.r,b.g,b.b,b.iconSizeIdx);
-    pendingIconFile=null;
+    pendingIconFile=null;pendingIconPreview=null;
   }
   toast('Guardado!');}
 

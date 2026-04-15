@@ -285,16 +285,33 @@ void handleSerial(){
   }
 }
 
+// ─── Setup overlay ───
+void drawSetupOverlay(){
+  lcd.fillRect(0,400,GRID_W,80,lcd.color565(15,15,30));
+  lcd.drawRoundRect(10,405,GRID_W-20,70,10,lcd.color565(60,60,80));
+  lcd.setTextDatum(middle_center);
+  lcd.setTextColor(lcd.color565(100,126,234));lcd.setFont(&fonts::Font2);
+  lcd.drawString("Configura desde Chrome:",GRID_W/2,425);
+  lcd.setTextColor(TFT_WHITE);lcd.setFont(&fonts::Font4);
+  lcd.drawString("sintex85.github.io/diy-streamdeck",GRID_W/2,450);
+  lcd.setTextColor(lcd.color565(80,80,100));lcd.setFont(&fonts::Font0);
+  lcd.drawString("Conecta USB + abre la web + pulsa Conectar USB",GRID_W/2,470);
+}
+
 // ─── Main ───
 void setup(){
-  Serial.begin(115200);delay(500);
-  Serial.println("[BOOT] Starting...");
+  Serial.begin(115200);Serial.setRxBufferSize(16384);
+  delay(500);Serial.println("[BOOT] Starting...");
   lcd.init();lcd.setRotation(0);
   for(int i=0;i<NUM_BUTTONS;i++){iconData[i]=NULL;hasIcon[i]=false;iconPixelSize[i]=32;buttons[i].action[0]='\0';buttons[i].actionType=0;}
   loadConfig();lcd.setBrightness(brightness);drawAll();
-  Serial.println("[BOOT] Starting BLE Keyboard (NimBLE)...");
+  // Show config URL if nothing configured yet
+  bool anyAction=false;
+  for(int i=0;i<NUM_BUTTONS;i++)if(buttons[i].actionType>0)anyAction=true;
+  if(!anyAction)drawSetupOverlay();
+  Serial.println("[BOOT] Starting BLE...");
   bleKb.begin();
-  Serial.println("[BOOT] Ready! Pair 'StreamDeck' via Bluetooth");}
+  Serial.println("[BOOT] Ready!");}
 
 void loop(){
   handleSerial();

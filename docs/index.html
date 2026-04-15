@@ -47,6 +47,13 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
 .actions button{flex:1;padding:10px;border-radius:8px;border:none;font-size:14px;font-weight:600;cursor:pointer}
 .btn-save{background:#667eea;color:#fff}.btn-cancel{background:#2a2a3e;color:#aaa}.btn-clear{background:#dc2626;color:#fff}
 .help{font-size:10px;color:#555;margin-top:4px}
+.help-box{max-width:640px;width:100%;background:#16213e;border-radius:12px;padding:20px;margin-bottom:20px;border:1px solid #2a2a3e}
+.help-box h2{font-size:16px;margin-bottom:12px;color:#667eea}
+.help-steps{display:flex;flex-direction:column;gap:10px}
+.hs{display:flex;gap:12px;align-items:flex-start;font-size:13px;color:#ccc;line-height:1.5}
+.hn{background:#667eea;color:#fff;min-width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0}
+.help-note{margin-top:14px;padding:10px;background:#0f1a30;border-radius:8px;font-size:12px;color:#aaa;line-height:1.5}
+.help-box.hidden{display:none}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#667eea;color:#fff;padding:10px 24px;border-radius:10px;font-size:14px;font-weight:600;display:none;z-index:200;box-shadow:0 4px 20px rgba(0,0,0,.5)}
 .toast.show{display:block;animation:fadeout .5s 2s forwards}
 @keyframes fadeout{to{opacity:0}}
@@ -58,6 +65,20 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
 <div class="bar">
   <button class="cbtn" id="connectBtn" onclick="connect()">Conectar USB</button>
   <span class="badge off" id="badge">Desconectado</span>
+</div>
+
+<div id="helpBox" class="help-box">
+  <h2>Como funciona</h2>
+  <div class="help-steps">
+    <div class="hs"><span class="hn">1</span><div><b>Conecta el Stream Deck</b> al PC con un cable USB</div></div>
+    <div class="hs"><span class="hn">2</span><div><b>Pulsa "Conectar USB"</b> arriba y selecciona el dispositivo</div></div>
+    <div class="hs"><span class="hn">3</span><div><b>Configura los botones:</b> pulsa uno para editarlo. Puedes poner URLs, apps (Spotify, Discord...), atajos de teclado (volumen, play, copiar...) o texto</div></div>
+    <div class="hs"><span class="hn">4</span><div><b>Sube iconos:</b> al editar un boton, pulsa "Subir imagen" para poner un icono en la pantalla del Stream Deck</div></div>
+    <div class="hs"><span class="hn">5</span><div><b>Deja esta pestaña abierta</b> (puedes anclarla). Las URLs y apps se abren desde aqui cuando pulsas un boton en el Stream Deck</div></div>
+  </div>
+  <div class="help-note">
+    <b>Bluetooth:</b> Empareja "StreamDeck" en los ajustes Bluetooth de tu PC para atajos de teclado y volumen (funcionan sin esta pestaña).
+  </div>
 </div>
 
 <div class="grid" id="grid"></div>
@@ -126,6 +147,7 @@ async function connect(){
     document.getElementById('badge').textContent='Conectado';
     document.getElementById('badge').className='badge on';
     document.getElementById('connectBtn').disabled=true;
+    document.getElementById('helpBox').classList.add('hidden');
     readLoop();
     await new Promise(r=>setTimeout(r,500));
     await loadButtons();

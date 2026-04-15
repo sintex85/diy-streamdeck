@@ -1,38 +1,37 @@
 # DIY Stream Deck con ESP32-8048S043
 
-## Que es esto
+## Que es
 
-Stream Deck casero con pantalla tactil. 12 botones configurables desde una web. Al pulsar un boton en la pantalla, el PC ejecuta una accion (abrir URL, lanzar app, comando de terminal). Los iconos de las webs se descargan automaticamente.
+Stream Deck casero con pantalla tactil 4.3". 12 botones configurables desde Chrome. Abre URLs, lanza apps, controla volumen, atajos de teclado. Iconos personalizados.
 
 ## Hardware
 
-- **Placa**: ESP32-8048S043 (Sunton) — ESP32-S3 con pantalla tactil 4.3" 800x480 RGB, touch GT911, chip USB CH340
-- **Conexion**: Cable USB al PC (datos, no solo carga)
+- **Placa**: ESP32-8048S043 (ESP32-S3, pantalla 800x480 RGB, touch GT911, CH340 USB)
+- **Conexion**: USB para alimentacion + config. Bluetooth para atajos de teclado.
+
+## Como funciona
+
+1. **USB**: conecta al PC, abre `sintex85.github.io/diy-streamdeck` en Chrome, pulsa "Conectar USB"
+2. **Config**: edita botones desde la web (URL, app, teclado, texto, iconos)
+3. **Bluetooth**: empareja "StreamDeck" para volumen y atajos (sin Chrome)
+4. **Deja Chrome abierto** para que URLs y apps funcionen al pulsar botones
+
+### Tipos de accion
+
+| Tipo | Como funciona | Necesita Chrome |
+|------|---------------|-----------------|
+| URL | Chrome abre la web | Si |
+| App | Chrome abre protocolo (spotify:, discord:) | Si |
+| Teclado | BLE envia teclas directo al OS | No |
+| Texto | BLE escribe texto | No |
 
 ## Flashear un ESP32 nuevo
 
-### Requisitos previos
+Conecta el ESP32 por USB. Detecta el puerto:
+- Mac: `ls /dev/cu.usbserial-*`
+- Windows: Administrador de dispositivos > Puertos COM
+- Driver CH340 si no aparece: wch.cn/downloads/CH341SER_EXE.html
 
-- Python 3 instalado
-- pyserial instalado (`pip3 install pyserial`)
-- El ESP32-8048S043 conectado por USB
-
-### Pasos
-
-1. **Detectar el puerto serial**:
-   - Mac: `ls /dev/cu.usbserial-*`
-   - Windows: abrir Administrador de dispositivos > Puertos COM, buscar "CH340"
-   - Linux: `ls /dev/ttyUSB*`
-   - Si no aparece, instalar driver CH340:
-     - Mac: https://www.wch.cn/downloads/CH341SER_MAC_ZIP.html
-     - Windows: https://www.wch.cn/downloads/CH341SER_EXE.html
-
-2. **Borrar la flash**:
-```bash
-python3 firmware/esptool.py --chip esp32s3 --port PUERTO erase_flash
-```
-
-3. **Escribir el firmware**:
 ```bash
 python3 firmware/esptool.py --chip esp32s3 --port PUERTO --baud 460800 \
   write_flash --flash_mode dio --flash_freq 80m --flash_size 16MB \
@@ -42,112 +41,49 @@ python3 firmware/esptool.py --chip esp32s3 --port PUERTO --baud 460800 \
   0x10000 firmware/button_counter.ino.bin
 ```
 
-Reemplazar `PUERTO` por el puerto detectado (ej: `/dev/cu.usbserial-8340` o `COM3`).
+O usa los scripts: `firmware/flashear_mac.command` / `firmware/flashear_windows.bat`
 
-4. **Verificar**: la pantalla debe encenderse y mostrar una cuadricula de 12 botones de colores.
-
-### Scripts automaticos (alternativa)
-
-En vez de los comandos manuales, hay scripts que auto-detectan el puerto:
-- Mac: doble-click en `firmware/flashear_mac.command`
-- Windows: doble-click en `firmware/flashear_windows.bat`
-
-## Recompilar el firmware (solo si modificas el codigo)
-
-Solo necesario si cambias `button_counter/button_counter.ino`.
-
-### Requisitos
-
-- Arduino CLI (`brew install arduino-cli` o https://arduino.github.io/arduino-cli/)
-- Core ESP32: `arduino-cli core install esp32:esp32@2.0.17`
-- Libreria: `arduino-cli lib install "LovyanGFX@1.2.19"`
-
-### Compilar
+## Recompilar (solo si modificas el codigo)
 
 ```bash
+# Requisitos
+arduino-cli core install esp32:esp32@2.0.17
+arduino-cli lib install "LovyanGFX@1.2.19"
+# NimBLE 2.4.0 + ESP32-BLE-Keyboard 0.4.0 (wakwak-koba fork) desde GitHub
+
+# Compilar
 arduino-cli compile \
   --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,FlashMode=qio,PartitionScheme=default_8MB,UploadSpeed=460800" \
   button_counter/
-```
 
-### Compilar y subir directo
-
-```bash
-arduino-cli compile \
-  --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,FlashMode=qio,PartitionScheme=default_8MB,UploadSpeed=460800" \
-  button_counter/ && \
+# Subir (para el servicio Python/Chrome antes de subir)
 arduino-cli upload \
   --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,FlashMode=qio,PartitionScheme=default_8MB,UploadSpeed=460800" \
-  --port PUERTO \
-  button_counter/
+  --port PUERTO button_counter/
 ```
 
-### Exportar binarios nuevos
+## Config tecnica del hardware
 
-```bash
-arduino-cli compile \
-  --fqbn "esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,FlashMode=qio,PartitionScheme=default_8MB,UploadSpeed=460800" \
-  --output-dir firmware/ \
-  button_counter/
-```
-
-Luego borrar `firmware/*.elf` y `firmware/*.map` (son enormes y no hacen falta para flashear).
-
-## Configuracion tecnica del hardware
-
-Estos valores son especificos del ESP32-8048S043. No cambiar a menos que se use otra placa.
-
-- **Display**: RGB paralelo 16-bit, 800x480, pines definidos en `LGFX_ESP32S3_RGB_ESP32-8048S043.h`
-- **Touch GT911**: I2C addr `0x5D`, I2C_NUM_0, SDA=GPIO19, SCL=GPIO20, pin_int=-1
-- **Backlight**: GPIO2 (PWM)
-- **PSRAM**: OPI mode (8MB)
-- **Flash**: QIO mode (16MB)
+- **Touch GT911**: I2C addr 0x5D, I2C_NUM_0, SDA=GPIO19, SCL=GPIO20, pin_int=-1
+- **Display**: LovyanGFX, `LGFX_ESP32S3_RGB_ESP32-8048S043.h`
+- **BLE**: NimBLE 2.4.0 + ESP32-BLE-Keyboard 0.4.0 (wakwak-koba fork)
+- **PSRAM**: OPI (8MB), **Flash**: QIO (16MB)
 
 ## Protocolo serial (115200 baud)
 
-Comunicacion entre el ESP32 y la app del PC:
-
 | Direccion | Comando | Descripcion |
 |-----------|---------|-------------|
-| ESP32 → PC | `BTN:N` | Boton N pulsado (0-11) |
-| PC → ESP32 | `SET:N:label:R,G,B` | Cambiar nombre y color del boton N |
-| PC → ESP32 | `ICON:N:base64` | Enviar icono 32x32 RGB565 en base64 |
-| PC → ESP32 | `NOICON:N` | Quitar icono del boton N |
-| PC → ESP32 | `GETALL` | Pedir config de todos los botones |
-| ESP32 → PC | `CFG:N:label:R,G,B:hasIcon` | Respuesta a GETALL |
-| PC → ESP32 | `RESETALL` | Restaurar config de fabrica |
+| ESP32 -> PC | `BTN:idx:type:action` | Boton pulsado |
+| PC -> ESP32 | `SET:N:label:R,G,B:sz,brd,lbl` | Config visual |
+| PC -> ESP32 | `ACT:N:type:action` | Config accion |
+| PC -> ESP32 | `ICON:N:size:base64` | Enviar icono RGB565 |
+| PC -> ESP32 | `GETALL` | Pedir toda la config |
+| PC -> ESP32 | `STATUS` | Estado BLE |
 
-## App del PC (streamdeck_app.py)
-
-- Servidor web en `localhost:1313`
-- Auto-detecta el ESP32 por USB
-- Descarga favicons automaticamente al configurar una URL
-- Multiplataforma: Mac, Windows, Linux
-- Dependencias: `pyserial`, `Pillow` (para iconos)
-
-### Modos de ejecucion
-
-```bash
-python3 streamdeck_app.py              # Normal: abre navegador al arrancar
-python3 streamdeck_app.py --daemon     # Servicio: abre navegador solo al detectar USB
-python3 streamdeck_app.py --install    # Instalar auto-arranque al iniciar sesion
-python3 streamdeck_app.py --uninstall  # Desinstalar auto-arranque
-```
-
-### Auto-arranque
-
-Con `--install`, la app se registra para ejecutarse al iniciar sesion del usuario:
-- **Mac**: crea un LaunchAgent en `~/Library/LaunchAgents/com.diy.streamdeck.plist`
-- **Windows**: crea un VBS en la carpeta Startup
-
-La app corre en segundo plano y abre el navegador automaticamente cada vez que se conecta el ESP32 por USB. Al desconectar, queda en espera. Al reconectar, vuelve a abrir el navegador.
-
-## Estructura de archivos
+## Estructura
 
 ```
-firmware/                  → Binarios para flashear (no recompilar)
-button_counter/            → Codigo fuente Arduino
-streamdeck_app.py          → App PC (configurador + listener)
-Instalar.command/.bat      → Instalador dependencias usuario final
-Stream Deck.command/.bat   → Launcher usuario final
+docs/index.html         -> Web de config (GitHub Pages)
+button_counter/         -> Codigo fuente Arduino
+firmware/               -> Binarios para flashear sin recompilar
 ```

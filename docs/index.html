@@ -74,6 +74,7 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
 <label><input type="radio" name="aType" value="1"><span>URL</span></label>
 <label><input type="radio" name="aType" value="3"><span>App</span></label>
 <label><input type="radio" name="aType" value="2"><span>Teclado</span></label>
+<label><input type="radio" name="aType" value="4"><span>Texto</span></label>
 </div></div>
 <div id="presetBox" style="display:none"><div class="presets" id="presets"></div></div>
 <div class="field"><label>Valor</label><input type="text" id="eAction"><div class="help" id="eHelp"></div></div>
@@ -111,8 +112,8 @@ const presets=[
 {i:"\u23EF",l:"Play",v:"play_pause"},{i:"\u23ED",l:"Next",v:"next_track"},{i:"\u23EE",l:"Prev",v:"prev_track"},
 {i:"\u{1F4CB}",l:"Copy",v:"ctrl+c"},{i:"\u{1F4CC}",l:"Paste",v:"ctrl+v"},{i:"\u21A9",l:"Undo",v:"ctrl+z"},
 {i:"\u{1F4BE}",l:"Save",v:"ctrl+s"},{i:"\u{1F50D}",l:"Find",v:"ctrl+f"},{i:"\u{1F4F8}",l:"Screenshot",v:"gui+shift+s"}];
-const helps={0:"",1:"https://youtube.com",3:"spotify: / discord: / slack:",2:"vol_up, play_pause, ctrl+c..."};
-const phs={0:"",1:"https://www.amazon.es",3:"spotify:",2:"ctrl+shift+a"};
+const helps={0:"",1:"https://youtube.com",3:"Protocolo de app: spotify: / discord: / slack: / zoommtg:",2:"vol_up, play_pause, ctrl+c...",4:"Texto que se escribira via BLE"};
+const phs={0:"",1:"https://www.amazon.es",3:"spotify:",2:"ctrl+shift+a",4:"Hola mundo"};
 
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show';setTimeout(()=>t.className='toast',2500);}
 
@@ -229,8 +230,13 @@ function updHelp(){
   document.getElementById('eHelp').textContent=helps[t]||'';
   document.getElementById('eAction').placeholder=phs[t]||'';
   const pb=document.getElementById('presetBox');
-  if(t===2){pb.style.display='';const pg=document.getElementById('presets');pg.innerHTML='';
-    presets.forEach(p=>{const d=document.createElement('div');d.className='preset';
+  const appPresets=[
+    {i:"\u{1F3B5}",l:"Spotify",v:"spotify:"},{i:"\u{1F4AC}",l:"Discord",v:"discord:"},{i:"\u{1F4AC}",l:"Slack",v:"slack:"},
+    {i:"\u{1F4F9}",l:"Zoom",v:"zoommtg:"},{i:"\u{1F4AC}",l:"Teams",v:"msteams:"},{i:"\u{1F4AC}",l:"Telegram",v:"tg:"},
+    {i:"\u{1F3AE}",l:"Steam",v:"steam:"},{i:"\u{1F4E7}",l:"Mail",v:"mailto:"},{i:"\u{1F4C1}",l:"Finder",v:"file:///"}];
+  if(t===2||t===3){pb.style.display='';const pg=document.getElementById('presets');pg.innerHTML='';
+    const list=t===2?presets:appPresets;
+    list.forEach(p=>{const d=document.createElement('div');d.className='preset';
       d.innerHTML=`<span class="pi">${p.i}</span>${p.l}`;
       d.onclick=()=>{document.getElementById('eAction').value=p.v;document.getElementById('eLabel').value=p.l;};
       pg.appendChild(d);});}else pb.style.display='none';}
@@ -263,10 +269,13 @@ function imgToRgb565Base64(img,size,bgR,bgG,bgB){
 }
 
 async function sendIconToESP32(idx,file,bgR,bgG,bgB,sizeIdx){
-  if(!writer)return;
+  if(!writer){toast('No conectado');return;}
+  toast('Procesando icono...');
   try{
+    console.log('[ICON] Creating bitmap from file...');
     const bmp=await createImageBitmap(file);
     const size=ICON_SIZES[sizeIdx||1];
+    console.log(`[ICON] Resizing to ${size}x${size}`);
     const cv=document.createElement('canvas');cv.width=size;cv.height=size;
     const ctx=cv.getContext('2d');
     ctx.fillStyle=`rgb(${bgR},${bgG},${bgB})`;ctx.fillRect(0,0,size,size);
@@ -279,15 +288,26 @@ async function sendIconToESP32(idx,file,bgR,bgG,bgB,sizeIdx){
       buf[i*2]=(rgb565>>8)&0xFF;buf[i*2+1]=rgb565&0xFF;
     }
     let bin='';for(let i=0;i<buf.length;i++)bin+=String.fromCharCode(buf[i]);
-    const cmd=`ICON:${idx}:${size}:${btoa(bin)}`;
-    const enc=new TextEncoder();const data=enc.encode(cmd+'\n');
-    for(let i=0;i<data.length;i+=512){
-      await writer.write(new TextDecoder().decode(data.slice(i,i+512)));
-      if(i+512<data.length)await new Promise(r=>setTimeout(r,30));
+    const b64=btoa(bin);
+    const cmd=`ICON:${idx}:${size}:${b64}`;
+    console.log(`[ICON] Sending ${cmd.length} chars via serial...`);
+    toast(`Enviando icono (${Math.round(cmd.length/1024)}KB)...`);
+
+    // Send in chunks
+    const fullData=cmd+'\n';
+    for(let i=0;i<fullData.length;i+=512){
+      const chunk=fullData.substring(i,i+512);
+      await writer.write(chunk);
+      if(i+512<fullData.length)await new Promise(r=>setTimeout(r,20));
     }
-    await new Promise(r=>setTimeout(r,300));
-    toast('Icono enviado al deck');
-  }catch(e){console.log('Icon error:',e);toast('Error enviando icono');}
+
+    // Wait for ESP32 response
+    await new Promise(r=>setTimeout(r,500));
+    console.log('[ICON] Sent. readBuf:',readBuf.substring(0,100));
+    if(readBuf.includes('OK')){toast('Icono OK!');}
+    else if(readBuf.includes('ERR')){toast('Error ESP32: '+readBuf);}
+    else{toast('Icono enviado (sin confirmacion)');}
+  }catch(e){console.log('[ICON] Error:',e);toast('Error: '+e.message);}
 }
 let pendingIconFile=null;
 
@@ -299,11 +319,14 @@ async function saveBtn(){
     iconSizeIdx:+document.querySelector('input[name=iSize]:checked').value,
     borderStyle:+document.querySelector('input[name=bStyle]:checked').value,
     showLabel:document.getElementById('eShowLabel').checked};
+  // Save icon BEFORE closeModal (which resets pendingIconFile)
+  const iconFile=pendingIconFile;
   await sendWait(`SET:${i}:${b.label}:${b.r},${b.g},${b.b}:${b.iconSizeIdx},${b.borderStyle},${b.showLabel?1:0}`);
   await sendWait(`ACT:${i}:${b.actionType}:${b.action}`);
   B[i]=b;render();closeModal();
-  if(pendingIconFile){
-    await sendIconToESP32(i,pendingIconFile,b.r,b.g,b.b,b.iconSizeIdx);
+  if(iconFile){
+    console.log('[SAVE] Sending icon file:',iconFile.name);
+    await sendIconToESP32(i,iconFile,b.r,b.g,b.b,b.iconSizeIdx);
     pendingIconFile=null;
   }
   toast('Guardado!');}

@@ -220,37 +220,70 @@ void drawAll(){lcd.fillScreen(TFT_BLACK);for(int i=0;i<NUM_BUTTONS;i++)drawButto
 int hitTest(int32_t tx,int32_t ty){if(tx>=SB_X)return-1;for(int i=0;i<NUM_BUTTONS;i++){int bx,by;getBtnRect(i,bx,by);if(tx>=bx&&tx<=bx+BTN_W&&ty>=by&&ty<=by+BTN_H)return i;}return-1;}
 
 // ─── Serial Config (Web Serial from Chrome) ───
-String serialBuf="";
+static char sBuf[14000];
+static int sLen=0;
 
-void processSerialCmd(const String&cmd){
-  if(cmd=="GETALL"){
+int sFindCh(char ch,int from){for(int i=from;i<sLen;i++)if(sBuf[i]==ch)return i;return-1;}
+int sToInt(int from,int to){char t[12];int n=min(to-from,11);memcpy(t,sBuf+from,n);t[n]=0;return atoi(t);}
+
+void processCmd(){
+  // Trim trailing whitespace
+  while(sLen>0&&(sBuf[sLen-1]==' '||sBuf[sLen-1]=='\t'))sLen--;
+  sBuf[sLen]=0;
+  if(sLen==0)return;
+
+  Serial.printf("[CMD] %.*s (%d)\n",min(sLen,40),sBuf,sLen);
+
+  if(sLen==6&&memcmp(sBuf,"GETALL",6)==0){
     for(int i=0;i<NUM_BUTTONS;i++)
       Serial.printf("CFG:%d:%s:%d,%d,%d:%d:%d,%d,%d:%d:%s\n",i,buttons[i].label,buttons[i].r,buttons[i].g,buttons[i].b,hasIcon[i]?1:0,buttons[i].iconSizeIdx,buttons[i].borderStyle,buttons[i].showLabel?1:0,buttons[i].actionType,buttons[i].action);
     Serial.println("END");return;}
-  if(cmd.startsWith("SET:")){
-    int p1=4,p2=cmd.indexOf(':',p1);if(p2<0)return;
-    int p3=cmd.indexOf(':',p2+1);if(p3<0)return;
-    int idx=cmd.substring(p1,p2).toInt();if(idx<0||idx>=NUM_BUTTONS)return;
-    strncpy(buttons[idx].label,cmd.substring(p2+1,p3).c_str(),19);buttons[idx].label[19]='\0';
-    String rest=cmd.substring(p3+1);int c1=rest.indexOf(','),c2=rest.indexOf(',',c1+1);if(c1<0||c2<0)return;
-    int nc=rest.indexOf(':',c2+1);String cp=(nc>=0)?rest.substring(0,nc):rest;
-    c1=cp.indexOf(',');c2=cp.indexOf(',',c1+1);
-    buttons[idx].r=cp.substring(0,c1).toInt();buttons[idx].g=cp.substring(c1+1,c2).toInt();buttons[idx].b=cp.substring(c2+1).toInt();
-    if(nc>=0){String ss=rest.substring(nc+1);int s1=ss.indexOf(','),s2=ss.indexOf(',',s1+1);
-      if(s1>=0&&s2>=0){buttons[idx].iconSizeIdx=constrain(ss.substring(0,s1).toInt(),0,3);buttons[idx].borderStyle=constrain(ss.substring(s1+1,s2).toInt(),0,3);buttons[idx].showLabel=ss.substring(s2+1).toInt()!=0;}}
-    saveConfig();drawButton(idx,false);Serial.println("OK");return;}
-  if(cmd.startsWith("ACT:")){
-    int p1=4,p2=cmd.indexOf(':',p1);if(p2<0)return;
-    int p3=cmd.indexOf(':',p2+1);if(p3<0)return;
-    int idx=cmd.substring(p1,p2).toInt();if(idx<0||idx>=NUM_BUTTONS)return;
-    buttons[idx].actionType=cmd.substring(p2+1,p3).toInt();
-    strncpy(buttons[idx].action,cmd.substring(p3+1).c_str(),127);buttons[idx].action[127]='\0';
-    saveConfig();Serial.println("OK");return;}
-  if(cmd=="STATUS"){Serial.printf("BLE:%s\n",bleKb.isConnected()?"CONNECTED":"WAITING");Serial.println("END");return;}
-  if(cmd=="TESTBLE"){if(bleKb.isConnected()){bleKb.print("StreamDeck OK! ");Serial.println("SENT");}else Serial.println("NOBLE");return;}
-  if(cmd=="PING"){Serial.println("PONG");return;}}
 
-void handleSerial(){while(Serial.available()){char c=Serial.read();if(c=='\n'){serialBuf.trim();if(serialBuf.length()>0)processSerialCmd(serialBuf);serialBuf="";}else if(c!='\r')serialBuf+=c;}}
+  if(sLen>=4&&memcmp(sBuf,"SET:",4)==0){
+    int p2=sFindCh(':',4);if(p2<0)return;int p3=sFindCh(':',p2+1);if(p3<0)return;
+    int idx=sToInt(4,p2);if(idx<0||idx>=NUM_BUTTONS)return;
+    int ll=min(p3-p2-1,19);memcpy(buttons[idx].label,sBuf+p2+1,ll);buttons[idx].label[ll]='\0';
+    int c1=sFindCh(',',p3+1),c2=sFindCh(',',c1+1);if(c1<0||c2<0)return;
+    int nc=sFindCh(':',c2+1);int ce=(nc>=0)?nc:sLen;
+    buttons[idx].r=sToInt(p3+1,c1);buttons[idx].g=sToInt(c1+1,c2);buttons[idx].b=sToInt(c2+1,ce);
+    if(nc>=0){int s1=sFindCh(',',nc+1),s2=sFindCh(',',s1+1);
+      if(s1>=0&&s2>=0){buttons[idx].iconSizeIdx=constrain(sToInt(nc+1,s1),0,3);buttons[idx].borderStyle=constrain(sToInt(s1+1,s2),0,3);buttons[idx].showLabel=sToInt(s2+1,sLen)!=0;}}
+    saveConfig();drawButton(idx,false);Serial.println("OK");return;}
+
+  if(sLen>=4&&memcmp(sBuf,"ACT:",4)==0){
+    int p2=sFindCh(':',4);if(p2<0)return;int p3=sFindCh(':',p2+1);if(p3<0)return;
+    int idx=sToInt(4,p2);if(idx<0||idx>=NUM_BUTTONS)return;
+    buttons[idx].actionType=sToInt(p2+1,p3);
+    int al=min(sLen-p3-1,127);memcpy(buttons[idx].action,sBuf+p3+1,al);buttons[idx].action[al]='\0';
+    saveConfig();Serial.println("OK");return;}
+
+  if(sLen>=5&&memcmp(sBuf,"ICON:",5)==0){
+    int p2=sFindCh(':',5);if(p2<0)return;int p3=sFindCh(':',p2+1);if(p3<0)return;
+    int idx=sToInt(5,p2);if(idx<0||idx>=NUM_BUTTONS)return;
+    int ps=sToInt(p2+1,p3);if(ps<16||ps>64)return;
+    int eb=ps*ps*2;
+    Serial.printf("[ICON] idx=%d sz=%d b64=%d\n",idx,ps,sLen-p3-1);
+    if(iconData[idx])free(iconData[idx]);
+    iconData[idx]=(uint16_t*)ps_malloc(eb);
+    if(!iconData[idx]){Serial.println("ERR:MEM");return;}
+    int d=base64_decode(sBuf+p3+1,sLen-p3-1,(uint8_t*)iconData[idx],eb);
+    Serial.printf("[ICON] dec=%d exp=%d\n",d,eb);
+    if(d>=eb){hasIcon[idx]=true;iconPixelSize[idx]=ps;drawButton(idx,false);Serial.println("OK");}
+    else{hasIcon[idx]=false;Serial.printf("ERR:DEC:%d/%d\n",d,eb);}return;}
+
+  if(sLen>=7&&memcmp(sBuf,"NOICON:",7)==0){int idx=atoi(sBuf+7);if(idx>=0&&idx<NUM_BUTTONS){hasIcon[idx]=false;drawButton(idx,false);}Serial.println("OK");return;}
+  if(sLen==6&&memcmp(sBuf,"STATUS",6)==0){Serial.printf("BLE:%s\n",bleKb.isConnected()?"CONNECTED":"WAITING");Serial.println("END");return;}
+  if(sLen==7&&memcmp(sBuf,"TESTBLE",7)==0){if(bleKb.isConnected()){bleKb.print("StreamDeck OK! ");Serial.println("SENT");}else Serial.println("NOBLE");return;}
+  if(sLen==4&&memcmp(sBuf,"PING",4)==0){Serial.println("PONG");return;}
+}
+
+void handleSerial(){
+  while(Serial.available()){
+    char c=Serial.read();
+    if(c=='\n'){processCmd();sLen=0;}
+    else if(c!='\r'&&sLen<(int)sizeof(sBuf)-1){sBuf[sLen++]=c;}
+  }
+}
 
 // ─── Main ───
 void setup(){

@@ -195,7 +195,11 @@ function render(){
   B.forEach((b,i)=>{if(!b)return;const d=document.createElement('div');d.className='btn-card';
     d.style.background=`rgb(${b.r},${b.g},${b.b})`;
     let h=b.action?(b.action.replace('https://','').replace('http://','').substring(0,25)):'';
-    d.innerHTML=`<span class="label">${b.label}</span><span class="hint">${h}</span>`;
+    let ico='';
+    if(b.action && b.actionType===1){
+      try{const u=new URL(b.action);ico=`<img src="https://www.google.com/s2/favicons?domain=${u.hostname}&sz=64" style="width:28px;height:28px;border-radius:6px" onerror="this.style.display='none'">`;}catch(e){}
+    }
+    d.innerHTML=`${ico}<span class="label">${b.label}</span><span class="hint">${h}</span>`;
     d.onclick=()=>openModal(i);g.appendChild(d);});}
 
 function openModal(i){eI=i;const b=B[i];if(!b)return;

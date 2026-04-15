@@ -220,16 +220,25 @@ function handleButtonPress(line){
   if(parts.length<4)return;
   const idx=parseInt(parts[1]);
   const type=parseInt(parts[2]);
-  const action=parts.slice(3).join(':'); // rejoin in case action has colons
+  const action=parts.slice(3).join(':');
 
   log('Boton '+(idx+1)+': '+action);
 
-  if(type===1){ // URL
-    window.open(action,'_blank');
-  } else if(type===3){ // App protocol
-    window.open(action,'_blank');
+  if(type===1 || type===3){ // URL or App
+    // Use link click to avoid popup blocker
+    const a=document.createElement('a');
+    a.href=action;
+    a.target='_blank';
+    a.rel='noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    log('Abriendo: '+action);
+
+    // Flash the button card
+    const cards=document.querySelectorAll('.btn-card');
+    if(cards[idx]){cards[idx].style.transform='scale(0.95)';setTimeout(()=>cards[idx].style.transform='',200);}
   }
-  // Types 2 (keyboard) and 4 (text) are handled by BLE on ESP32
 }
 
 async function send(cmd){

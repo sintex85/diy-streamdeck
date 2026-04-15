@@ -78,6 +78,12 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
 <div id="presetBox" style="display:none"><div class="presets" id="presets"></div></div>
 <div class="field"><label>Valor</label><input type="text" id="eAction"><div class="help" id="eHelp"></div></div>
 <div class="sep"></div>
+<div class="field"><label>Icono para la pantalla</label>
+<div style="display:flex;gap:8px;align-items:center">
+<label style="padding:8px 16px;border-radius:8px;background:#667eea;color:#fff;font-size:13px;font-weight:600;cursor:pointer" for="eIcon">Subir imagen</label>
+<input type="file" id="eIcon" accept="image/*" style="display:none">
+<span id="eIconName" style="font-size:12px;color:#888">-</span>
+</div></div>
 <div class="field"><label>Tamano icono</label><div class="pills">
 <label><input type="radio" name="iSize" value="0"><span>S</span></label>
 <label><input type="radio" name="iSize" value="1"><span>M</span></label>
@@ -211,6 +217,7 @@ function openModal(i){eI=i;const b=B[i];if(!b)return;
   document.querySelector(`input[name=iSize][value="${b.iconSizeIdx||1}"]`).checked=true;
   document.querySelector(`input[name=bStyle][value="${b.borderStyle||0}"]`).checked=true;
   document.getElementById('eShowLabel').checked=b.showLabel!==false;
+  pendingIconFile=null;document.getElementById('eIconName').textContent='-';document.getElementById('eIcon').value='';
   updHelp();document.getElementById('overlay').classList.add('active');}
 
 function closeModal(){document.getElementById('overlay').classList.remove('active');eI=-1;}
@@ -229,6 +236,11 @@ function updHelp(){
       pg.appendChild(d);});}else pb.style.display='none';}
 
 document.querySelectorAll('input[name=aType]').forEach(r=>r.addEventListener('change',updHelp));
+document.getElementById('eIcon').addEventListener('change',function(e){
+  const f=e.target.files[0];if(!f)return;
+  pendingIconFile=f;
+  document.getElementById('eIconName').textContent=f.name;
+});
 document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeModal();});
 
 // ─── Icon processing ───
@@ -250,20 +262,14 @@ function imgToRgb565Base64(img,size,bgR,bgG,bgB){
   return btoa(bin);
 }
 
-async function sendIconForButton(idx,b){
-  if(!writer||!b.action||b.actionType!==1)return;
+async function sendIconToESP32(idx,file,bgR,bgG,bgB,sizeIdx){
+  if(!writer)return;
   try{
-    const u=new URL(b.action);
-    // DuckDuckGo favicon API supports CORS
-    const url=`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://www.google.com/s2/favicons?domain=${u.hostname}&sz=128`)}`;
-    const resp=await fetch(url);
-    if(!resp.ok)throw new Error('fetch failed');
-    const blob=await resp.blob();
-    const bmp=await createImageBitmap(blob);
-    const size=ICON_SIZES[b.iconSizeIdx||1];
+    const bmp=await createImageBitmap(file);
+    const size=ICON_SIZES[sizeIdx||1];
     const cv=document.createElement('canvas');cv.width=size;cv.height=size;
     const ctx=cv.getContext('2d');
-    ctx.fillStyle=`rgb(${b.r},${b.g},${b.b})`;ctx.fillRect(0,0,size,size);
+    ctx.fillStyle=`rgb(${bgR},${bgG},${bgB})`;ctx.fillRect(0,0,size,size);
     ctx.drawImage(bmp,0,0,size,size);
     const px=ctx.getImageData(0,0,size,size).data;
     const buf=new Uint8Array(size*size*2);
@@ -273,18 +279,17 @@ async function sendIconForButton(idx,b){
       buf[i*2]=(rgb565>>8)&0xFF;buf[i*2+1]=rgb565&0xFF;
     }
     let bin='';for(let i=0;i<buf.length;i++)bin+=String.fromCharCode(buf[i]);
-    const b64=btoa(bin);
-    // Send via serial in chunks
-    const cmd=`ICON:${idx}:${size}:${b64}`;
+    const cmd=`ICON:${idx}:${size}:${btoa(bin)}`;
     const enc=new TextEncoder();const data=enc.encode(cmd+'\n');
     for(let i=0;i<data.length;i+=512){
       await writer.write(new TextDecoder().decode(data.slice(i,i+512)));
       if(i+512<data.length)await new Promise(r=>setTimeout(r,30));
     }
     await new Promise(r=>setTimeout(r,300));
-    toast('Icono enviado');
-  }catch(e){console.log('Icon error:',e);toast('Sin icono');}
+    toast('Icono enviado al deck');
+  }catch(e){console.log('Icon error:',e);toast('Error enviando icono');}
 }
+let pendingIconFile=null;
 
 async function saveBtn(){
   const i=eI,c=hexRgb(document.getElementById('eColor').value);
@@ -297,7 +302,10 @@ async function saveBtn(){
   await sendWait(`SET:${i}:${b.label}:${b.r},${b.g},${b.b}:${b.iconSizeIdx},${b.borderStyle},${b.showLabel?1:0}`);
   await sendWait(`ACT:${i}:${b.actionType}:${b.action}`);
   B[i]=b;render();closeModal();
-  await sendIconForButton(i,b);
+  if(pendingIconFile){
+    await sendIconToESP32(i,pendingIconFile,b.r,b.g,b.b,b.iconSizeIdx);
+    pendingIconFile=null;
+  }
   toast('Guardado!');}
 
 async function clearBtn(){

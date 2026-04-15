@@ -254,12 +254,27 @@ async function sendIconForButton(idx,b){
   if(!writer||!b.action||b.actionType!==1)return;
   try{
     const u=new URL(b.action);
-    const url=`https://www.google.com/s2/favicons?domain=${u.hostname}&sz=128`;
-    const img=new Image();img.crossOrigin='anonymous';
-    await new Promise((ok,fail)=>{img.onload=ok;img.onerror=fail;img.src=url;});
+    // DuckDuckGo favicon API supports CORS
+    const url=`https://icons.duckduckgo.com/ip3/${u.hostname}.ico`;
+    const resp=await fetch(url);
+    if(!resp.ok)throw new Error('fetch failed');
+    const blob=await resp.blob();
+    const bmp=await createImageBitmap(blob);
     const size=ICON_SIZES[b.iconSizeIdx||1];
-    const b64=imgToRgb565Base64(img,size,b.r,b.g,b.b);
-    // Send in chunks (serial buffer limit)
+    const cv=document.createElement('canvas');cv.width=size;cv.height=size;
+    const ctx=cv.getContext('2d');
+    ctx.fillStyle=`rgb(${b.r},${b.g},${b.b})`;ctx.fillRect(0,0,size,size);
+    ctx.drawImage(bmp,0,0,size,size);
+    const px=ctx.getImageData(0,0,size,size).data;
+    const buf=new Uint8Array(size*size*2);
+    for(let i=0;i<size*size;i++){
+      const r=px[i*4],g=px[i*4+1],bl=px[i*4+2];
+      const rgb565=((r&0xF8)<<8)|((g&0xFC)<<3)|(bl>>3);
+      buf[i*2]=(rgb565>>8)&0xFF;buf[i*2+1]=rgb565&0xFF;
+    }
+    let bin='';for(let i=0;i<buf.length;i++)bin+=String.fromCharCode(buf[i]);
+    const b64=btoa(bin);
+    // Send via serial in chunks
     const cmd=`ICON:${idx}:${size}:${b64}`;
     const enc=new TextEncoder();const data=enc.encode(cmd+'\n');
     for(let i=0;i<data.length;i+=512){
@@ -268,7 +283,7 @@ async function sendIconForButton(idx,b){
     }
     await new Promise(r=>setTimeout(r,300));
     toast('Icono enviado');
-  }catch(e){console.log('Icon error:',e);}
+  }catch(e){console.log('Icon error:',e);toast('Sin icono');}
 }
 
 async function saveBtn(){

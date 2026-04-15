@@ -37,6 +37,7 @@ bool hasIcon[NUM_BUTTONS];
 int iconPixelSize[NUM_BUTTONS];
 int activeButton = -1;
 bool locked = false;
+bool infoShown = false;
 uint8_t brightness = 255;
 int activeSidebar = -1;
 
@@ -196,8 +197,12 @@ int sidebarHitTest(int32_t tx,int32_t ty){if(tx<SB_X)return-1;return ty/SB_ITEM_
 void handleSidebarTouch(int item){switch(item){
   case 0: // BLE status - no action
     break;
-  case 1: // Config gear - send URL via serial for Chrome to open
-    Serial.println("BTN:99:1:https://sintex85.github.io/diy-streamdeck");
+  case 1: // Config gear - show info screen with URL
+    if(infoShown) hideInfoScreen();
+    else {
+      drawInfoScreen();
+      Serial.println("BTN:99:1:https://sintex85.github.io/diy-streamdeck");
+    }
     break;
   case 2:brightness=min(255,brightness+30);lcd.setBrightness(brightness);saveConfig();drawSidebar();break;
   case 3:brightness=max(25,brightness-30);lcd.setBrightness(brightness);saveConfig();drawSidebar();break;
@@ -292,17 +297,56 @@ void handleSerial(){
   }
 }
 
-// ─── Setup overlay ───
-void drawSetupOverlay(){
-  lcd.fillRect(0,400,GRID_W,80,lcd.color565(15,15,30));
-  lcd.drawRoundRect(10,405,GRID_W-20,70,10,lcd.color565(60,60,80));
+// ─── Info / Setup screens ───
+void drawInfoScreen(){
+  // Full screen info overlay
+  lcd.fillRect(0,0,GRID_W,480,lcd.color565(15,15,30));
   lcd.setTextDatum(middle_center);
-  lcd.setTextColor(lcd.color565(100,126,234));lcd.setFont(&fonts::Font2);
-  lcd.drawString("Configura desde Chrome:",GRID_W/2,425);
+
+  // Title
+  lcd.setTextColor(lcd.color565(100,126,234));lcd.setFont(&fonts::Font4);
+  lcd.drawString("DIY Stream Deck",GRID_W/2,40);
+  lcd.setTextColor(lcd.color565(120,120,140));lcd.setFont(&fonts::Font2);
+  lcd.drawString("by Bits y Tornillos",GRID_W/2,65);
+
+  // Config URL box
+  lcd.fillRoundRect(30,95,GRID_W-60,80,12,lcd.color565(25,30,50));
+  lcd.drawRoundRect(30,95,GRID_W-60,80,12,lcd.color565(100,126,234));
+  lcd.setTextColor(lcd.color565(180,180,200));lcd.setFont(&fonts::Font2);
+  lcd.drawString("Abre en Chrome:",GRID_W/2,115);
   lcd.setTextColor(TFT_WHITE);lcd.setFont(&fonts::Font4);
-  lcd.drawString("sintex85.github.io/diy-streamdeck",GRID_W/2,450);
-  lcd.setTextColor(lcd.color565(80,80,100));lcd.setFont(&fonts::Font0);
-  lcd.drawString("Conecta USB + abre la web + pulsa Conectar USB",GRID_W/2,470);
+  lcd.drawString("sintex85.github.io",GRID_W/2,142);
+  lcd.setTextColor(lcd.color565(200,200,220));
+  lcd.drawString("/diy-streamdeck",GRID_W/2,165);
+
+  // Steps
+  int sy=200;
+  lcd.setFont(&fonts::Font2);
+  const char* steps[]={
+    "1. Conecta el USB al PC",
+    "2. Abre Chrome con la URL de arriba",
+    "3. Pulsa 'Conectar USB'",
+    "4. Configura tus botones",
+    "5. Deja la pestana abierta",
+    "",
+    "Bluetooth: empareja 'StreamDeck'",
+    "para volumen y atajos de teclado"
+  };
+  for(int i=0;i<8;i++){
+    lcd.setTextColor(i<5?lcd.color565(200,200,210):i==5?0:lcd.color565(100,150,200));
+    lcd.drawString(steps[i],GRID_W/2,sy+i*28);
+  }
+
+  // Footer
+  lcd.setTextColor(lcd.color565(80,80,100));lcd.setFont(&fonts::Font2);
+  lcd.drawString("Toca para volver",GRID_W/2,460);
+
+  infoShown=true;
+}
+
+void hideInfoScreen(){
+  infoShown=false;
+  drawAll();
 }
 
 // ─── Main ───
@@ -311,11 +355,18 @@ void setup(){
   delay(500);Serial.println("[BOOT] Starting...");
   lcd.init();lcd.setRotation(0);
   for(int i=0;i<NUM_BUTTONS;i++){iconData[i]=NULL;hasIcon[i]=false;iconPixelSize[i]=32;buttons[i].action[0]='\0';buttons[i].actionType=0;}
-  loadConfig();lcd.setBrightness(brightness);drawAll();
-  // Show config URL if nothing configured yet
+  loadConfig();lcd.setBrightness(brightness);
+
+  // First boot: show info screen. Otherwise show deck.
   bool anyAction=false;
   for(int i=0;i<NUM_BUTTONS;i++)if(buttons[i].actionType>0)anyAction=true;
-  if(!anyAction)drawSetupOverlay();
+  if(!anyAction){
+    drawAll();
+    drawInfoScreen();
+  } else {
+    drawAll();
+  }
+
   Serial.println("[BOOT] Starting BLE...");
   bleKb.begin();
   Serial.println("[BOOT] Ready!");}
@@ -326,8 +377,10 @@ void loop(){
   if(curBle!=lastBle){lastBle=curBle;drawSidebar();Serial.printf("[BLE] %s\n",curBle?"Connected":"Disconnected");}
   int32_t tx,ty;bool touched=lcd.getTouch(&tx,&ty);
   if(touched&&activeButton==-1&&activeSidebar==-1){
-    int sb=sidebarHitTest(tx,ty);
-    if(sb>=0){activeSidebar=sb;handleSidebarTouch(sb);}
-    else if(!locked){int hit=hitTest(tx,ty);if(hit>=0){activeButton=hit;drawButton(hit,true);executeAction(hit);}}}
+    if(infoShown&&tx<SB_X){hideInfoScreen();}
+    else{
+      int sb=sidebarHitTest(tx,ty);
+      if(sb>=0){activeSidebar=sb;handleSidebarTouch(sb);}
+      else if(!locked&&!infoShown){int hit=hitTest(tx,ty);if(hit>=0){activeButton=hit;drawButton(hit,true);executeAction(hit);}}}}
   if(!touched){if(activeButton>=0){drawButton(activeButton,false);activeButton=-1;}activeSidebar=-1;}
   delay(10);}

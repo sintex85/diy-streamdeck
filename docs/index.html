@@ -184,7 +184,7 @@ async function connectUSB(){
     await new Promise(r=>setTimeout(r,500));
     await loadButtons();
     await checkBLE();
-    setInterval(checkBLE, 5000);
+    setInterval(checkBLE, 10000); // Less frequent to avoid serial conflicts
   }catch(e){log('Error: '+e.message);alert('Error conectando: '+e.message);}
 }
 

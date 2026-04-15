@@ -137,16 +137,40 @@ void executeAction(int idx){
   if(idx<0||idx>=NUM_BUTTONS||buttons[idx].actionType==0||strlen(buttons[idx].action)==0)return;
   Serial.printf("[ACT] Btn %d type=%d action=%s\n",idx,buttons[idx].actionType,buttons[idx].action);
 
-  // Send button press via serial for web page to handle URLs/apps
+  // Always send via serial for Chrome tab to handle
   Serial.printf("BTN:%d:%d:%s\n", idx, buttons[idx].actionType, buttons[idx].action);
 
-  // BLE handles keyboard shortcuts and media keys directly
-  if(buttons[idx].actionType == 2) {
-    sendKeyCombo(buttons[idx].action);
-  } else if(buttons[idx].actionType == 4 && bleKb.isConnected()) {
-    bleKb.print(buttons[idx].action);
+  switch(buttons[idx].actionType) {
+    case 1: // URL - also try BLE fallback via OS search
+    case 3: // App protocol
+      if(bleKb.isConnected()) {
+        // Fallback: open via OS (Spotlight on Mac / Win+R on Windows)
+        // Cmd+Space = Spotlight (Mac) or search (Windows)
+        bleKb.press(KEY_LEFT_GUI);
+        bleKb.press(' ');
+        delay(50);
+        bleKb.releaseAll();
+        delay(500);
+        // Type clean URL (only letters, numbers, dots)
+        String u = String(buttons[idx].action);
+        u.replace("https://www.",""); u.replace("http://www.","");
+        u.replace("https://",""); u.replace("http://","");
+        for(int i=0;i<u.length();i++){
+          char c=u[i];
+          if(c==':'||c=='/'||c=='?'||c=='#'||c=='@'||c=='&'||c=='=') continue;
+          bleKb.press(c);delay(8);bleKb.release(c);delay(8);
+        }
+        delay(100);
+        bleKb.write(KEY_RETURN);
+      }
+      break;
+    case 2: // Keyboard shortcut
+      sendKeyCombo(buttons[idx].action);
+      break;
+    case 4: // Text
+      if(bleKb.isConnected()) bleKb.print(buttons[idx].action);
+      break;
   }
-  // Types 1 (URL) and 3 (App) are handled by the web page via serial
 }
 
 // ─── Sidebar ───

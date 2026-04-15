@@ -1,28 +1,24 @@
 <!DOCTYPE html>
 <html lang="es"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Stream Deck Config</title>
+<title>Stream Deck</title>
+<link rel="manifest" href="manifest.json">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,sans-serif;background:#1a1a2e;color:#eee;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:20px 12px}
 h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .sub{color:#888;margin-bottom:16px;font-size:13px}
-.connect-bar{display:flex;gap:10px;align-items:center;margin-bottom:20px}
-.connect-btn{padding:10px 24px;border-radius:10px;border:none;background:#667eea;color:#fff;font-size:15px;font-weight:600;cursor:pointer}
-.connect-btn:hover{background:#5a6fd6}
-.connect-btn:disabled{background:#333;color:#666;cursor:default}
+.bar{display:flex;gap:10px;align-items:center;margin-bottom:16px}
+.cbtn{padding:10px 24px;border-radius:10px;border:none;background:#667eea;color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+.cbtn:hover{background:#5a6fd6}.cbtn:disabled{background:#333;color:#666;cursor:default}
 .badge{padding:4px 12px;border-radius:12px;font-size:12px}
-.on{background:#0d3320;color:#4ade80}
-.off{background:#3b1111;color:#f87171}
-
+.on{background:#0d3320;color:#4ade80}.off{background:#3b1111;color:#f87171}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;max-width:640px;width:100%;margin-bottom:20px}
-.btn-card{aspect-ratio:1.3;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;box-shadow:0 3px 10px rgba(0,0,0,.4);border:2px solid transparent;gap:4px;position:relative}
+.btn-card{aspect-ratio:1.3;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;box-shadow:0 3px 10px rgba(0,0,0,.4);border:2px solid transparent;gap:4px}
 .btn-card:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.3)}
 .btn-card .label{font-size:14px;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.5)}
 .btn-card .hint{font-size:10px;opacity:.6;max-width:90%;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.btn-card .ei{position:absolute;top:6px;right:8px;font-size:12px;opacity:0;transition:opacity .2s}
-.btn-card:hover .ei{opacity:.8}
-
+.btn-card.flash{transform:scale(.95);opacity:.7}
 .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center}
 .overlay.active{display:flex}
 .modal{background:#16213e;border-radius:16px;padding:24px;width:420px;max-width:95vw;box-shadow:0 15px 50px rgba(0,0,0,.5);max-height:90vh;overflow-y:auto}
@@ -51,60 +47,21 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
 .actions button{flex:1;padding:10px;border-radius:8px;border:none;font-size:14px;font-weight:600;cursor:pointer}
 .btn-save{background:#667eea;color:#fff}.btn-cancel{background:#2a2a3e;color:#aaa}.btn-clear{background:#dc2626;color:#fff}
 .help{font-size:10px;color:#555;margin-top:4px}
-.warn{background:#2a2000;border:1px solid #665500;border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px;color:#ffcc00;text-align:center}
-.ble-panel{max-width:640px;width:100%;background:#16213e;border-radius:12px;padding:16px;margin-bottom:16px}
-.ble-status{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-.ble-dot{width:12px;height:12px;border-radius:50%;display:inline-block}
-.ble-dot.ok{background:#4ade80;box-shadow:0 0 8px #4ade80}
-.ble-dot.wait{background:#f59e0b;animation:pulse 1.5s infinite}
-.ble-dot.off{background:#666}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-.ble-help{margin-top:10px}
-.ble-help p{font-size:13px;color:#ccc;margin-bottom:8px}
-.ble-steps{margin:12px 0}
-.ble-step{display:flex;align-items:center;gap:10px;padding:8px 0;font-size:13px;color:#bbb}
-.sn{background:#667eea;color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0}
-.ble-open-btn{padding:10px 20px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px}
-.ble-open-btn:hover{background:#2563eb}
-.ble-ok{display:flex;align-items:center;gap:12px;margin-top:8px}
-.ble-test-btn{padding:8px 16px;border-radius:8px;border:none;background:#0d3320;color:#4ade80;font-size:13px;font-weight:600;cursor:pointer}
-.ble-test-btn:hover{background:#15462b}
-.ble-test-msg{font-size:12px;color:#888}
-.log{max-width:640px;width:100%;background:#0a0a15;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;color:#666;max-height:80px;overflow-y:auto;margin-top:10px}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#667eea;color:#fff;padding:10px 24px;border-radius:10px;font-size:14px;font-weight:600;display:none;z-index:200;box-shadow:0 4px 20px rgba(0,0,0,.5)}
+.toast.show{display:block;animation:fadeout .5s 2s forwards}
+@keyframes fadeout{to{opacity:0}}
 </style></head><body>
 
-<h1>Stream Deck Config</h1>
-<p class="sub">by Bits y Tornillos - conecta el ESP32 por USB</p>
+<h1>Stream Deck</h1>
+<p class="sub">by Bits y Tornillos</p>
 
-<div id="warn" class="warn" style="display:none">Necesitas <b>Google Chrome</b> para conectar por USB</div>
-
-<div class="connect-bar">
-  <button class="connect-btn" id="connectBtn" onclick="connectUSB()">Conectar USB</button>
+<div class="bar">
+  <button class="cbtn" id="connectBtn" onclick="connect()">Conectar USB</button>
   <span class="badge off" id="badge">Desconectado</span>
 </div>
 
-<div id="blePanel" class="ble-panel" style="display:none">
-  <div class="ble-status">
-    <span class="ble-dot" id="bleDot"></span>
-    <span id="bleText">Bluetooth: comprobando...</span>
-  </div>
-  <div id="bleHelp" class="ble-help" style="display:none">
-    <p><b>El Stream Deck necesita Bluetooth para funcionar.</b></p>
-    <p>Empareja "StreamDeck" en los ajustes de Bluetooth de tu PC:</p>
-    <div class="ble-steps">
-      <div class="ble-step"><span class="sn">1</span> Abre <b>Ajustes Bluetooth</b> de tu PC</div>
-      <div class="ble-step"><span class="sn">2</span> Busca <b>"StreamDeck"</b> en dispositivos</div>
-      <div class="ble-step"><span class="sn">3</span> Pulsa <b>Emparejar / Conectar</b></div>
-    </div>
-    <button class="ble-open-btn" onclick="openBTSettings()">Abrir Ajustes Bluetooth</button>
-  </div>
-  <div id="bleOk" class="ble-ok" style="display:none">
-    <button class="ble-test-btn" onclick="testBLE()">Probar teclado BLE</button>
-    <span class="ble-test-msg" id="bleTestMsg"></span>
-  </div>
-</div>
-
 <div class="grid" id="grid"></div>
+<div class="toast" id="toast"></div>
 
 <div class="overlay" id="overlay">
 <div class="modal">
@@ -117,10 +74,9 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
 <label><input type="radio" name="aType" value="1"><span>URL</span></label>
 <label><input type="radio" name="aType" value="3"><span>App</span></label>
 <label><input type="radio" name="aType" value="2"><span>Teclado</span></label>
-<label><input type="radio" name="aType" value="4"><span>Texto</span></label>
 </div></div>
 <div id="presetBox" style="display:none"><div class="presets" id="presets"></div></div>
-<div class="field"><label>Valor</label><input type="text" id="eAction" placeholder="https://..."><div class="help" id="eHelp"></div></div>
+<div class="field"><label>Valor</label><input type="text" id="eAction"><div class="help" id="eHelp"></div></div>
 <div class="sep"></div>
 <div class="field"><label>Tamano icono</label><div class="pills">
 <label><input type="radio" name="iSize" value="0"><span>S</span></label>
@@ -141,187 +97,121 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
 <button class="btn-save" onclick="saveBtn()">Guardar</button>
 </div></div></div>
 
-<div class="log" id="log"></div>
-
 <script>
-let port=null, reader=null, writer=null, B=[], eI=-1;
-let readBuf='';
+let port,reader,writer,B=[],eI=-1,readBuf='',busy=false;
 
 const presets=[
-{i:"🔊",l:"Vol +",v:"vol_up"},{i:"🔉",l:"Vol -",v:"vol_down"},{i:"🔇",l:"Mute",v:"vol_mute"},
-{i:"⏯",l:"Play",v:"play_pause"},{i:"⏭",l:"Next",v:"next_track"},{i:"⏮",l:"Prev",v:"prev_track"},
-{i:"📋",l:"Copy",v:"ctrl+c"},{i:"📌",l:"Paste",v:"ctrl+v"},{i:"↩",l:"Undo",v:"ctrl+z"},
-{i:"💾",l:"Save",v:"ctrl+s"},{i:"🔍",l:"Find",v:"ctrl+f"},{i:"📸",l:"Screenshot",v:"gui+shift+s"}];
-const helps={0:"",1:"URL completa (https://youtube.com)",2:"Atajo: ctrl+c, vol_up, play_pause... (via BLE)",3:"Protocolo de app (spotify:, discord:, slack:)",4:"Texto que se escribira via BLE"};
-const phs={0:"",1:"https://www.youtube.com",2:"ctrl+shift+a",3:"spotify:",4:"Hola mundo"};
+{i:"\u{1F50A}",l:"Vol +",v:"vol_up"},{i:"\u{1F509}",l:"Vol -",v:"vol_down"},{i:"\u{1F507}",l:"Mute",v:"vol_mute"},
+{i:"\u23EF",l:"Play",v:"play_pause"},{i:"\u23ED",l:"Next",v:"next_track"},{i:"\u23EE",l:"Prev",v:"prev_track"},
+{i:"\u{1F4CB}",l:"Copy",v:"ctrl+c"},{i:"\u{1F4CC}",l:"Paste",v:"ctrl+v"},{i:"\u21A9",l:"Undo",v:"ctrl+z"},
+{i:"\u{1F4BE}",l:"Save",v:"ctrl+s"},{i:"\u{1F50D}",l:"Find",v:"ctrl+f"},{i:"\u{1F4F8}",l:"Screenshot",v:"gui+shift+s"}];
+const helps={0:"",1:"https://youtube.com",3:"spotify: / discord: / slack:",2:"vol_up, play_pause, ctrl+c..."};
+const phs={0:"",1:"https://www.amazon.es",3:"spotify:",2:"ctrl+shift+a"};
 
-if(!("serial" in navigator)) document.getElementById('warn').style.display='block';
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show';setTimeout(()=>t.className='toast',2500);}
 
-function log(msg){const el=document.getElementById('log');el.textContent+=msg+'\n';el.scrollTop=el.scrollHeight;}
-
-async function connectUSB(){
+async function connect(){
   try{
-    port = await navigator.serial.requestPort();
+    port=await navigator.serial.requestPort();
     await port.open({baudRate:115200});
-
-    const textDec = new TextDecoderStream();
-    port.readable.pipeTo(textDec.writable);
-    reader = textDec.readable.getReader();
-
-    const textEnc = new TextEncoderStream();
-    textEnc.readable.pipeTo(port.writable);
-    writer = textEnc.writable.getWriter();
-
+    const dec=new TextDecoderStream();port.readable.pipeTo(dec.writable);reader=dec.readable.getReader();
+    const enc=new TextEncoderStream();enc.readable.pipeTo(port.writable);writer=enc.writable.getWriter();
     document.getElementById('badge').textContent='Conectado';
     document.getElementById('badge').className='badge on';
     document.getElementById('connectBtn').disabled=true;
-    log('Conectado al ESP32');
-
-    // Start reading in background
     readLoop();
-
-    // Load config and check BLE
     await new Promise(r=>setTimeout(r,500));
     await loadButtons();
-    await checkBLE();
-    setInterval(checkBLE, 10000); // Less frequent to avoid serial conflicts
-  }catch(e){log('Error: '+e.message);alert('Error conectando: '+e.message);}
+    toast('Conectado!');
+  }catch(e){toast('Error: '+e.message);}
 }
 
 async function readLoop(){
   try{
     let lineBuf='';
     while(true){
-      const {value,done}=await reader.read();
+      const{value,done}=await reader.read();
       if(done)break;
       readBuf+=value;
-      // Also check for button presses
       lineBuf+=value;
       const lines=lineBuf.split('\n');
-      lineBuf=lines.pop(); // keep incomplete line
+      lineBuf=lines.pop();
       for(const line of lines){
         const l=line.trim();
         if(l.startsWith('BTN:')){
-          handleButtonPress(l);
+          const p=l.split(':');if(p.length>=4){
+            const idx=+p[1],type=+p[2],action=p.slice(3).join(':');
+            flashCard(idx);
+            if(type===1||type===3){
+              const a=document.createElement('a');a.href=action;a.target='_blank';a.rel='noopener';
+              document.body.appendChild(a);a.click();document.body.removeChild(a);
+            }
+          }
         }
       }
     }
   }catch(e){
-    log('Desconectado');
     document.getElementById('badge').textContent='Desconectado';
     document.getElementById('badge').className='badge off';
     document.getElementById('connectBtn').disabled=false;
   }
 }
 
-function handleButtonPress(line){
-  // BTN:idx:actionType:action
-  const parts=line.split(':');
-  if(parts.length<4)return;
-  const idx=parseInt(parts[1]);
-  const type=parseInt(parts[2]);
-  const action=parts.slice(3).join(':');
+function flashCard(idx){const c=document.querySelectorAll('.btn-card');if(c[idx]){c[idx].classList.add('flash');setTimeout(()=>c[idx].classList.remove('flash'),300);}}
 
-  log('Boton '+(idx+1)+': '+action);
+async function send(cmd){if(writer)await writer.write(cmd+'\n');}
 
-  if(type===1 || type===3){ // URL or App
-    // Use link click to avoid popup blocker
-    const a=document.createElement('a');
-    a.href=action;
-    a.target='_blank';
-    a.rel='noopener';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    log('Abriendo: '+action);
-
-    // Flash the button card
-    const cards=document.querySelectorAll('.btn-card');
-    if(cards[idx]){cards[idx].style.transform='scale(0.95)';setTimeout(()=>cards[idx].style.transform='',200);}
-  }
-}
-
-async function send(cmd){
-  if(!writer)return;
-  await writer.write(cmd+'\n');
-}
-
-async function sendAndWait(cmd, endMarker='OK', timeout=3000){
-  readBuf='';
+async function sendWait(cmd,marker='OK',timeout=3000){
+  while(busy)await new Promise(r=>setTimeout(r,50));
+  busy=true;readBuf='';
   await send(cmd);
   const start=Date.now();
   while(Date.now()-start<timeout){
-    await new Promise(r=>setTimeout(r,50));
-    if(readBuf.includes(endMarker) || readBuf.includes('END') || readBuf.includes('ERR')){
-      await new Promise(r=>setTimeout(r,150));
-      break;
-    }
+    await new Promise(r=>setTimeout(r,30));
+    if(readBuf.includes(marker)||readBuf.includes('END')||readBuf.includes('ERR'))
+      {await new Promise(r=>setTimeout(r,100));break;}
   }
-  const resp=readBuf;
-  readBuf='';
-  return resp.trim();
+  const r=readBuf;readBuf='';busy=false;return r.trim();
 }
 
 async function loadButtons(){
-  log('Cargando config...');
-  const resp = await sendAndWait('GETALL', 'END', 4000);
-  log('Recibido '+resp.length+' chars');
-  try{
-    // Format: CFG:idx:label:R,G,B:hasIcon:sz,brd,lbl:actType:action
-    const lines = resp.split('\n').filter(l=>l.startsWith('CFG:'));
-    B=[];
-    for(const line of lines){
-      // Split only first 7 colons (action may contain colons like https://)
-      const p=[];
-      let start=0;
-      for(let c=0;c<7;c++){
-        const idx=line.indexOf(':',start);
-        if(idx<0)break;
-        p.push(line.substring(start,idx));
-        start=idx+1;
-      }
-      p.push(line.substring(start)); // rest is action (may contain colons)
-
-      if(p.length<7)continue;
-      // p[0]=CFG, p[1]=idx, p[2]=label, p[3]=R,G,B, p[4]=hasIcon, p[5]=sz,brd,lbl, p[6]=actType, p[7]=action
-      const i=parseInt(p[1]);
-      const colors=p[3].split(',');
-      const style=p[5].split(',');
-      const actType=parseInt(p[6])||0;
-      const action=p[7]||'';
-
-      B[i]={l:p[2], r:parseInt(colors[0]),g:parseInt(colors[1]),b:parseInt(colors[2]),
-        a:action, y:actType,
-        z:parseInt(style[0]||1), d:parseInt(style[1]||0), t:parseInt(style[2]||1)};
-    }
-    if(B.length>0){render();log('Config cargada: '+B.length+' botones');}
-    else log('No se pudo cargar config. Respuesta: '+resp.substring(0,200));
-  }catch(e){log('Error parseando: '+e.message);}
+  const resp=await sendWait('GETALL','END',4000);
+  const lines=resp.split('\n').filter(l=>l.startsWith('CFG:'));
+  B=[];
+  for(const line of lines){
+    const p=[];let s=0;
+    for(let c=0;c<7;c++){const i=line.indexOf(':',s);if(i<0)break;p.push(line.substring(s,i));s=i+1;}
+    p.push(line.substring(s));
+    if(p.length<8)continue;
+    const col=p[3].split(','),sty=p[5].split(',');
+    B[+p[1]]={label:p[2],r:+col[0],g:+col[1],b:+col[2],action:p[7],actionType:+p[6]||0,
+      iconSizeIdx:+sty[0]||1,borderStyle:+sty[1]||0,showLabel:+sty[2]!==0};
+  }
+  render();
 }
 
 function render(){
   const g=document.getElementById('grid');g.innerHTML='';
-  B.forEach((b,i)=>{const d=document.createElement('div');d.className='btn-card';
+  B.forEach((b,i)=>{if(!b)return;const d=document.createElement('div');d.className='btn-card';
     d.style.background=`rgb(${b.r},${b.g},${b.b})`;
-    let h=b.a?(b.a.replace('https://','').replace('http://','').substring(0,20)):'';
-    d.innerHTML=`<span class="ei">✎</span><span class="label">${b.l}</span><span class="hint">${h}</span>`;
-    d.onclick=()=>openModal(i);g.appendChild(d);});
-}
+    let h=b.action?(b.action.replace('https://','').replace('http://','').substring(0,25)):'';
+    d.innerHTML=`<span class="label">${b.label}</span><span class="hint">${h}</span>`;
+    d.onclick=()=>openModal(i);g.appendChild(d);});}
 
-function openModal(i){eI=i;const b=B[i];
+function openModal(i){eI=i;const b=B[i];if(!b)return;
   document.getElementById('eIdx').textContent=i+1;
-  document.getElementById('eLabel').value=b.l;
+  document.getElementById('eLabel').value=b.label;
   document.getElementById('eColor').value=rgbHex(b.r,b.g,b.b);
-  document.getElementById('eAction').value=b.a||'';
-  document.querySelector(`input[name=aType][value="${b.y||0}"]`).checked=true;
-  document.querySelector(`input[name=iSize][value="${b.z||1}"]`).checked=true;
-  document.querySelector(`input[name=bStyle][value="${b.d||0}"]`).checked=true;
-  document.getElementById('eShowLabel').checked=!!b.t;
+  document.getElementById('eAction').value=b.action||'';
+  document.querySelector(`input[name=aType][value="${b.actionType||0}"]`).checked=true;
+  document.querySelector(`input[name=iSize][value="${b.iconSizeIdx||1}"]`).checked=true;
+  document.querySelector(`input[name=bStyle][value="${b.borderStyle||0}"]`).checked=true;
+  document.getElementById('eShowLabel').checked=b.showLabel!==false;
   updHelp();document.getElementById('overlay').classList.add('active');}
 
 function closeModal(){document.getElementById('overlay').classList.remove('active');eI=-1;}
 function rgbHex(r,g,b){return'#'+[r,g,b].map(x=>x.toString(16).padStart(2,'0')).join('');}
-function hexRgb(h){const m=h.match(/^#?(\w{2})(\w{2})(\w{2})$/);return m?[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)]:[100,100,100];}
+function hexRgb(h){const m=h.match(/^#?(\w{2})(\w{2})(\w{2})$/);return m?[+('0x'+m[1]),+('0x'+m[2]),+('0x'+m[3])]:[100,100,100];}
 
 function updHelp(){
   const t=+document.querySelector('input[name=aType]:checked').value;
@@ -339,85 +229,21 @@ document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==
 
 async function saveBtn(){
   const i=eI,c=hexRgb(document.getElementById('eColor').value);
-  const label=document.getElementById('eLabel').value||String(i+1);
-  const action=document.getElementById('eAction').value;
-  const actionType=+document.querySelector('input[name=aType]:checked').value;
-  const iconSize=+document.querySelector('input[name=iSize]:checked').value;
-  const borderStyle=+document.querySelector('input[name=bStyle]:checked').value;
-  const showLabel=document.getElementById('eShowLabel').checked?1:0;
-
-  // Send visual config
-  const cmd=`SET:${i}:${label}:${c[0]},${c[1]},${c[2]}:${iconSize},${borderStyle},${showLabel}`;
-  log('SET: '+cmd);
-  const r1 = await sendAndWait(cmd,'OK',2000);
-  log('-> '+r1);
-
-  // Send action config
-  const actCmd=`ACT:${i}:${actionType}:${action}`;
-  log('ACT: '+actCmd);
-  const r2 = await sendAndWait(actCmd,'OK',2000);
-  log('-> '+r2);
-
-  B[i]={l:label,r:c[0],g:c[1],b:c[2],a:action,y:actionType,z:iconSize,d:borderStyle,t:showLabel};
-  render();closeModal();
-  log('Boton '+(i+1)+' guardado');}
-
-// ─── BLE Status ───
-async function checkBLE(){
-  if(!writer)return;
-  const resp=await sendAndWait('STATUS','END',1500);
-  const connected=resp.includes('CONNECTED');
-  const dot=document.getElementById('bleDot');
-  const txt=document.getElementById('bleText');
-  const help=document.getElementById('bleHelp');
-  const ok=document.getElementById('bleOk');
-  document.getElementById('blePanel').style.display='';
-
-  if(connected){
-    dot.className='ble-dot ok';
-    txt.textContent='Bluetooth: conectado - los botones funcionan';
-    txt.style.color='#4ade80';
-    help.style.display='none';
-    ok.style.display='';
-  }else{
-    dot.className='ble-dot wait';
-    txt.textContent='Bluetooth: esperando emparejamiento...';
-    txt.style.color='#f59e0b';
-    help.style.display='';
-    ok.style.display='none';
-  }
-}
-
-function openBTSettings(){
-  // Try to open Bluetooth settings
-  const ua=navigator.userAgent.toLowerCase();
-  if(ua.includes('win')) window.open('ms-settings:bluetooth','_blank');
-  else if(ua.includes('mac')) window.open('x-apple.systempreferences:com.apple.BluetoothSettings','_blank');
-  else alert('Abre Ajustes > Bluetooth en tu dispositivo');
-}
-
-async function testBLE(){
-  const msg=document.getElementById('bleTestMsg');
-  msg.textContent='Enviando...';
-  const resp=await sendAndWait('TESTBLE','SENT',2000);
-  if(resp.includes('SENT')){
-    msg.textContent='Enviado! Mira si aparecio "StreamDeck OK!" donde tengas el cursor';
-    msg.style.color='#4ade80';
-  }else if(resp.includes('NOBLE')){
-    msg.textContent='BLE no conectado. Empareja primero.';
-    msg.style.color='#f87171';
-  }else{
-    msg.textContent='Sin respuesta';
-    msg.style.color='#f87171';
-  }
-}
+  const b={label:document.getElementById('eLabel').value||String(i+1),
+    r:c[0],g:c[1],b:c[2],action:document.getElementById('eAction').value,
+    actionType:+document.querySelector('input[name=aType]:checked').value,
+    iconSizeIdx:+document.querySelector('input[name=iSize]:checked').value,
+    borderStyle:+document.querySelector('input[name=bStyle]:checked').value,
+    showLabel:document.getElementById('eShowLabel').checked};
+  await sendWait(`SET:${i}:${b.label}:${b.r},${b.g},${b.b}:${b.iconSizeIdx},${b.borderStyle},${b.showLabel?1:0}`);
+  await sendWait(`ACT:${i}:${b.actionType}:${b.action}`);
+  B[i]=b;render();closeModal();toast('Guardado!');}
 
 async function clearBtn(){
   const i=eI;
-  await sendAndWait(`SET:${i}:${i+1}:100,100,100:1,0,1`,'OK',2000);
-  await sendAndWait(`ACT:${i}:0:`,'OK',2000);
-  B[i]={l:String(i+1),r:100,g:100,b:100,a:'',y:0,z:1,d:0,t:1};
-  render();closeModal();
-  log('Boton '+(i+1)+' limpiado');}
+  await sendWait(`SET:${i}:${i+1}:100,100,100:1,0,1`);
+  await sendWait(`ACT:${i}:0:`);
+  B[i]={label:String(i+1),r:100,g:100,b:100,action:'',actionType:0,iconSizeIdx:1,borderStyle:0,showLabel:true};
+  render();closeModal();toast('Limpiado');}
 </script>
 </body></html>

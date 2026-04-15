@@ -141,28 +141,9 @@ void executeAction(int idx){
   Serial.printf("BTN:%d:%d:%s\n", idx, buttons[idx].actionType, buttons[idx].action);
 
   switch(buttons[idx].actionType) {
-    case 1: // URL - also try BLE fallback via OS search
-    case 3: // App protocol
-      if(bleKb.isConnected()) {
-        // Fallback: open via OS (Spotlight on Mac / Win+R on Windows)
-        // Cmd+Space = Spotlight (Mac) or search (Windows)
-        bleKb.press(KEY_LEFT_GUI);
-        bleKb.press(' ');
-        delay(50);
-        bleKb.releaseAll();
-        delay(500);
-        // Type clean URL (only letters, numbers, dots)
-        String u = String(buttons[idx].action);
-        u.replace("https://www.",""); u.replace("http://www.","");
-        u.replace("https://",""); u.replace("http://","");
-        for(int i=0;i<u.length();i++){
-          char c=u[i];
-          if(c==':'||c=='/'||c=='?'||c=='#'||c=='@'||c=='&'||c=='=') continue;
-          bleKb.press(c);delay(8);bleKb.release(c);delay(8);
-        }
-        delay(100);
-        bleKb.write(KEY_RETURN);
-      }
+    case 1: // URL - handled by Python service via serial BTN: message
+    case 3: // App - handled by Python service via serial BTN: message
+      // No BLE typing - the service opens URLs cleanly without interfering
       break;
     case 2: // Keyboard shortcut
       sendKeyCombo(buttons[idx].action);

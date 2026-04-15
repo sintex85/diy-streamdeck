@@ -115,6 +115,7 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
 <div class="pills">
 <label><input type="radio" name="aType" value="0"><span>Ninguna</span></label>
 <label><input type="radio" name="aType" value="1"><span>URL</span></label>
+<label><input type="radio" name="aType" value="3"><span>App</span></label>
 <label><input type="radio" name="aType" value="2"><span>Teclado</span></label>
 <label><input type="radio" name="aType" value="4"><span>Texto</span></label>
 </div></div>
@@ -151,8 +152,8 @@ const presets=[
 {i:"⏯",l:"Play",v:"play_pause"},{i:"⏭",l:"Next",v:"next_track"},{i:"⏮",l:"Prev",v:"prev_track"},
 {i:"📋",l:"Copy",v:"ctrl+c"},{i:"📌",l:"Paste",v:"ctrl+v"},{i:"↩",l:"Undo",v:"ctrl+z"},
 {i:"💾",l:"Save",v:"ctrl+s"},{i:"🔍",l:"Find",v:"ctrl+f"},{i:"📸",l:"Screenshot",v:"gui+shift+s"}];
-const helps={0:"",1:"URL completa (https://...)",2:"Atajo: ctrl+c, vol_up, play_pause...",4:"Texto que se escribira"};
-const phs={0:"",1:"https://www.amazon.es",2:"ctrl+shift+a",4:"Hola mundo"};
+const helps={0:"",1:"URL completa (https://youtube.com)",2:"Atajo: ctrl+c, vol_up, play_pause... (via BLE)",3:"Protocolo de app (spotify:, discord:, slack:)",4:"Texto que se escribira via BLE"};
+const phs={0:"",1:"https://www.youtube.com",2:"ctrl+shift+a",3:"spotify:",4:"Hola mundo"};
 
 if(!("serial" in navigator)) document.getElementById('warn').style.display='block';
 
@@ -189,10 +190,21 @@ async function connectUSB(){
 
 async function readLoop(){
   try{
+    let lineBuf='';
     while(true){
       const {value,done}=await reader.read();
       if(done)break;
       readBuf+=value;
+      // Also check for button presses
+      lineBuf+=value;
+      const lines=lineBuf.split('\n');
+      lineBuf=lines.pop(); // keep incomplete line
+      for(const line of lines){
+        const l=line.trim();
+        if(l.startsWith('BTN:')){
+          handleButtonPress(l);
+        }
+      }
     }
   }catch(e){
     log('Desconectado');
@@ -200,6 +212,24 @@ async function readLoop(){
     document.getElementById('badge').className='badge off';
     document.getElementById('connectBtn').disabled=false;
   }
+}
+
+function handleButtonPress(line){
+  // BTN:idx:actionType:action
+  const parts=line.split(':');
+  if(parts.length<4)return;
+  const idx=parseInt(parts[1]);
+  const type=parseInt(parts[2]);
+  const action=parts.slice(3).join(':'); // rejoin in case action has colons
+
+  log('Boton '+(idx+1)+': '+action);
+
+  if(type===1){ // URL
+    window.open(action,'_blank');
+  } else if(type===3){ // App protocol
+    window.open(action,'_blank');
+  }
+  // Types 2 (keyboard) and 4 (text) are handled by BLE on ESP32
 }
 
 async function send(cmd){

@@ -1,5 +1,6 @@
 #include "LGFX_ESP32S3_RGB_ESP32-8048S043.h"
 #include <Preferences.h>
+#define USE_NIMBLE
 #include <BleKeyboard.h>
 
 LGFX lcd;
@@ -84,8 +85,28 @@ void loadConfig(){
 // ─── BLE Keyboard Actions ───
 void openUrlViaBLE(const char*url){
   if(!bleKb.isConnected())return;
-  bleKb.press(KEY_LEFT_GUI);bleKb.press('l');delay(50);bleKb.releaseAll();
-  delay(400);bleKb.print(url);delay(100);bleKb.write(KEY_RETURN);}
+
+  // Open new tab (Cmd+T on Mac, Ctrl+T on Win)
+  bleKb.press(KEY_LEFT_GUI);bleKb.press('t');delay(50);bleKb.releaseAll();
+  delay(500);
+
+  // Strip protocol and www - browser auto-completes
+  String u = String(url);
+  u.replace("https://www.","");
+  u.replace("http://www.","");
+  u.replace("https://","");
+  u.replace("http://","");
+
+  // Type only safe characters
+  for(int i=0; i<u.length(); i++){
+    char c = u[i];
+    if(c==':' || c=='/' || c=='?' || c=='#' || c=='@' || c=='&' || c=='=') continue;
+    bleKb.press(c);delay(10);bleKb.release(c);delay(10);
+  }
+  delay(50);
+  bleKb.write(KEY_BACKSPACE); // Clear Chrome's autocomplete suggestion
+  delay(50);
+  bleKb.write(KEY_RETURN);}
 
 void sendKeyCombo(const char*combo){
   if(!bleKb.isConnected())return;
@@ -115,10 +136,18 @@ void sendKeyCombo(const char*combo){
 void executeAction(int idx){
   if(idx<0||idx>=NUM_BUTTONS||buttons[idx].actionType==0||strlen(buttons[idx].action)==0)return;
   Serial.printf("[ACT] Btn %d type=%d action=%s\n",idx,buttons[idx].actionType,buttons[idx].action);
-  switch(buttons[idx].actionType){
-    case 1:case 3:openUrlViaBLE(buttons[idx].action);break;
-    case 2:sendKeyCombo(buttons[idx].action);break;
-    case 4:if(bleKb.isConnected())bleKb.print(buttons[idx].action);break;}}
+
+  // Send button press via serial for web page to handle URLs/apps
+  Serial.printf("BTN:%d:%d:%s\n", idx, buttons[idx].actionType, buttons[idx].action);
+
+  // BLE handles keyboard shortcuts and media keys directly
+  if(buttons[idx].actionType == 2) {
+    sendKeyCombo(buttons[idx].action);
+  } else if(buttons[idx].actionType == 4 && bleKb.isConnected()) {
+    bleKb.print(buttons[idx].action);
+  }
+  // Types 1 (URL) and 3 (App) are handled by the web page via serial
+}
 
 // ─── Sidebar ───
 void drawGearIcon(int cx,int cy,uint16_t col){lcd.fillCircle(cx,cy,8,col);lcd.fillCircle(cx,cy,4,SB_BG);for(int a=0;a<360;a+=45){float r=a*3.14159/180;lcd.fillCircle(cx+cos(r)*11,cy+sin(r)*11,3,col);}}
@@ -225,7 +254,7 @@ void setup(){
   lcd.init();lcd.setRotation(0);
   for(int i=0;i<NUM_BUTTONS;i++){iconData[i]=NULL;hasIcon[i]=false;iconPixelSize[i]=32;buttons[i].action[0]='\0';buttons[i].actionType=0;}
   loadConfig();lcd.setBrightness(brightness);drawAll();
-  Serial.println("[BOOT] Starting BLE Keyboard...");
+  Serial.println("[BOOT] Starting BLE Keyboard (NimBLE)...");
   bleKb.begin();
   Serial.println("[BOOT] Ready! Pair 'StreamDeck' via Bluetooth");}
 

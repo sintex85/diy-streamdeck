@@ -144,21 +144,43 @@ const phs={0:"",1:"https://www.amazon.es",3:"spotify:",2:"ctrl+shift+a",4:"Hola 
 
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show';setTimeout(()=>t.className='toast',2500);}
 
+async function openPort(p){
+  port=p;
+  await port.open({baudRate:115200});
+  const dec=new TextDecoderStream();port.readable.pipeTo(dec.writable);reader=dec.readable.getReader();
+  const enc=new TextEncoderStream();enc.readable.pipeTo(port.writable);writer=enc.writable.getWriter();
+  document.getElementById('badge').textContent='Conectado';
+  document.getElementById('badge').className='badge on';
+  document.getElementById('connectBtn').disabled=true;
+  document.getElementById('helpBox').classList.add('hidden');
+  readLoop();
+  await new Promise(r=>setTimeout(r,600));
+  await loadButtons();
+}
+
 async function connect(){
+  try{ const p=await navigator.serial.requestPort(); await openPort(p); toast('Conectado!'); }
+  catch(e){toast('Error: '+e.message);}
+}
+
+// ── Reconexion automatica: al recargar la pagina o al reenchufar el USB ──
+async function tryAutoConnect(tries){
+  tries=tries||4;
+  if(writer||!navigator.serial)return;
   try{
-    port=await navigator.serial.requestPort();
-    await port.open({baudRate:115200});
-    const dec=new TextDecoderStream();port.readable.pipeTo(dec.writable);reader=dec.readable.getReader();
-    const enc=new TextEncoderStream();enc.readable.pipeTo(port.writable);writer=enc.writable.getWriter();
-    document.getElementById('badge').textContent='Conectado';
-    document.getElementById('badge').className='badge on';
-    document.getElementById('connectBtn').disabled=true;
-    document.getElementById('helpBox').classList.add('hidden');
-    readLoop();
-    await new Promise(r=>setTimeout(r,500));
-    await loadButtons();
-    toast('Conectado!');
-  }catch(e){toast('Error: '+e.message);}
+    const ports=await navigator.serial.getPorts();   // puertos ya autorizados (sin popup)
+    if(ports.length){ await openPort(ports[0]); toast('Reconectado'); return; }
+  }catch(e){}
+  if(tries>1) setTimeout(()=>tryAutoConnect(tries-1),1200);
+}
+if(navigator.serial){
+  navigator.serial.addEventListener('connect',()=>setTimeout(()=>tryAutoConnect(),900));
+  navigator.serial.addEventListener('disconnect',()=>{
+    writer=null;port=null;
+    document.getElementById('badge').textContent='Desconectado';
+    document.getElementById('badge').className='badge off';
+    document.getElementById('connectBtn').disabled=false;});
+  window.addEventListener('load',()=>setTimeout(()=>tryAutoConnect(),600));
 }
 
 async function readLoop(){
@@ -190,6 +212,7 @@ async function readLoop(){
       }
     }
   }catch(e){
+    writer=null;port=null;
     document.getElementById('badge').textContent='Desconectado';
     document.getElementById('badge').className='badge off';
     document.getElementById('connectBtn').disabled=false;

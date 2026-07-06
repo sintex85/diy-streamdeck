@@ -12,6 +12,10 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
 .cbtn:hover{background:#5a6fd6}.cbtn:disabled{background:#333;color:#666;cursor:default}
 .badge{padding:4px 12px;border-radius:12px;font-size:12px}
 .on{background:#0d3320;color:#4ade80}.off{background:#3b1111;color:#f87171}
+.ptabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;justify-content:center}
+.ptab{padding:8px 20px;border-radius:8px;background:#16213e;border:1px solid #2a2a3e;color:#aaa;cursor:pointer;font-size:14px;font-weight:600;transition:all .15s}
+.ptab:hover{border-color:#667eea}
+.ptab.active{background:#667eea;color:#fff;border-color:#667eea}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;max-width:640px;width:100%;margin-bottom:20px}
 .btn-card{aspect-ratio:1.3;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;box-shadow:0 3px 10px rgba(0,0,0,.4);border:2px solid transparent;gap:4px}
 .btn-card:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.3)}
@@ -80,6 +84,7 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
   </div>
 </div>
 
+<div class="ptabs" id="ptabs"></div>
 <div class="grid" id="grid"></div>
 <div class="toast" id="toast"></div>
 
@@ -126,6 +131,8 @@ h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#667eea,#7
 
 <script>
 let port,reader,writer,B=[],eI=-1,readBuf='',busy=false;
+const PAGES=3,PER_PAGE=12;let curWebPage=0;
+function renderTabs(){const t=document.getElementById('ptabs');t.innerHTML='';for(let p=0;p<PAGES;p++){const d=document.createElement('div');d.className='ptab'+(p===curWebPage?' active':'');d.textContent='Pagina '+(p+1);d.onclick=()=>{curWebPage=p;render();};t.appendChild(d);}}
 
 const presets=[
 {i:"\u{1F50A}",l:"Vol +",v:"vol_up"},{i:"\u{1F509}",l:"Vol -",v:"vol_down"},{i:"\u{1F507}",l:"Mute",v:"vol_mute"},
@@ -189,7 +196,7 @@ async function readLoop(){
   }
 }
 
-function flashCard(idx){const c=document.querySelectorAll('.btn-card');if(c[idx]){c[idx].classList.add('flash');setTimeout(()=>c[idx].classList.remove('flash'),300);}}
+function flashCard(idx){if(Math.floor(idx/PER_PAGE)!==curWebPage)return;const local=idx%PER_PAGE;const c=document.querySelectorAll('.btn-card');if(c[local]){c[local].classList.add('flash');setTimeout(()=>c[local].classList.remove('flash'),300);}}
 
 async function send(cmd){if(writer)await writer.write(cmd+'\n');}
 
@@ -256,15 +263,19 @@ function getIconHtml(b){
 }
 
 function render(){
+  renderTabs();
   const g=document.getElementById('grid');g.innerHTML='';
-  B.forEach((b,i)=>{if(!b)return;const d=document.createElement('div');d.className='btn-card';
+  for(let i=0;i<PER_PAGE;i++){
+    const gi=curWebPage*PER_PAGE+i;const b=B[gi];if(!b)continue;
+    const d=document.createElement('div');d.className='btn-card';
     d.style.background=`rgb(${b.r},${b.g},${b.b})`;
     let h=b.action?(b.action.replace('https://','').replace('http://','').substring(0,25)):'';
     d.innerHTML=`${getIconHtml(b)}<span class="label">${b.label}</span><span class="hint">${h}</span>`;
-    d.onclick=()=>openModal(i);g.appendChild(d);});}
+    d.onclick=()=>openModal(gi);g.appendChild(d);
+  }}
 
 function openModal(i){eI=i;const b=B[i];if(!b)return;
-  document.getElementById('eIdx').textContent=i+1;
+  document.getElementById('eIdx').textContent=(Math.floor(i/PER_PAGE)+1)+'.'+((i%PER_PAGE)+1);
   document.getElementById('eLabel').value=b.label;
   document.getElementById('eColor').value=rgbHex(b.r,b.g,b.b);
   document.getElementById('eAction').value=b.action||'';
@@ -398,5 +409,7 @@ async function clearBtn(){
   await sendWait(`ACT:${i}:0:`);
   B[i]={label:String(i+1),r:100,g:100,b:100,action:'',actionType:0,iconSizeIdx:1,borderStyle:0,showLabel:true};
   render();closeModal();toast('Limpiado');}
+
+renderTabs();  // pestañas visibles antes de conectar
 </script>
 </body></html>

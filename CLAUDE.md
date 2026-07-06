@@ -62,6 +62,29 @@ arduino-cli upload \
   --port PUERTO button_counter/
 ```
 
+## Variante ESP32 clasico (ESP32-32E 4" ST7796) — `streamdeck_esp32/`
+
+Segunda placa soportada: **ESP32 clasico (WROOM-32E), pantalla SPI ST7796 480x320 + touch XPT2046** (la misma placa del proyecto SPL Meter, sin PSRAM). Mismo protocolo serie -> la misma web `docs/index.html` sirve sin cambios.
+
+- **Sketch**: `streamdeck_esp32/streamdeck_esp32.ino` + `LGFX_ESP32_ST7796.h`
+- **Pinout pantalla (HSPI)**: SCLK=14, MOSI=13, MISO=12, DC=2, CS=15, RST=-1, BL=27
+- **Touch XPT2046 (HSPI compartido)**: CS=33, INT=36
+- **Diferencias vs S3**: layout 480x320 (4x3 = 12 botones), `malloc` en vez de `ps_malloc` (sin PSRAM), `setRotation(1)`
+- **Calibracion tactil**: el XPT2046 necesita calibrarse o los toques caen en el boton vecino. En el 1er arranque (sin cal en NVS) se auto-calibra: tocar las marcas de las esquinas. Recalibrar en cualquier momento con el comando serie `CALIB`. La calibracion (`CALDATA:...`, 8 valores affine) se guarda en NVS namespace `deck` key `cal`.
+- **Paginas**: 3 paginas de 12 botones (36 en total, indices globales 0-35). Navegacion con las flechas `Pag ◀/▶` de la barra lateral; indicador `1/3`. Comando serie `PAGE:n` (0-2) para cambiar de pagina (util para test). La web `docs/index.html` tiene pestañas Pagina 1/2/3 que mapean a los mismos indices globales — protocolo sin cambios, solo mas indices.
+- **Iconos**: la web manda RGB565 **big-endian**; el firmware hace `lcd.setSwapBytes(true)` para que los colores salgan bien. Sin eso los iconos se ven con colores rotos.
+
+```bash
+# Compilar
+arduino-cli compile \
+  --fqbn "esp32:esp32:esp32:FlashSize=4M,PartitionScheme=huge_app,PSRAM=disabled,UploadSpeed=460800" \
+  streamdeck_esp32/
+# Subir (usar 460800; 921600 puede dar "Invalid head of packet" con algunos cables CH340)
+arduino-cli upload \
+  --fqbn "esp32:esp32:esp32:FlashSize=4M,PartitionScheme=huge_app,PSRAM=disabled,UploadSpeed=460800" \
+  --port /dev/cu.usbserial-XXXX streamdeck_esp32/
+```
+
 ## Config tecnica del hardware
 
 - **Touch GT911**: I2C addr 0x5D, I2C_NUM_0, SDA=GPIO19, SCL=GPIO20, pin_int=-1

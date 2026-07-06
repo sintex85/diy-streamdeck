@@ -74,6 +74,15 @@ Segunda placa soportada: **ESP32 clasico (WROOM-32E), pantalla SPI ST7796 480x32
 - **Paginas**: 3 paginas de 12 botones (36 en total, indices globales 0-35). Navegacion con las flechas `Pag ◀/▶` de la barra lateral; indicador `1/3`. Comando serie `PAGE:n` (0-2) para cambiar de pagina (util para test). La web `docs/index.html` tiene pestañas Pagina 1/2/3 que mapean a los mismos indices globales — protocolo sin cambios, solo mas indices.
 - **Iconos**: la web manda RGB565 **big-endian**; el firmware hace `lcd.setSwapBytes(true)` para que los colores salgan bien. Sin eso los iconos se ven con colores rotos.
 
+## Agente de macOS (`mac-agent/`) — funciona con solo enchufar el cable
+
+Sin la pestaña de Chrome abierta, las URLs/apps no se abren (la placa solo emite `BTN:` por serie; alguien en el Mac tiene que escuchar). `mac-agent/streamdeck_agent.py` es un daemon que escucha el puerto serie y hace `open <url|app>` con los botones tipo 1 (URL) y 3 (App). Los tipos 2 (teclado) y 4 (texto) los manda la placa por BLE, el agente los ignora.
+
+- `install.command`: copia el agente a `~/Library/Application Support/StreamDeck/`, crea el plist launchd `com.bitsytornillos.streamdeck` en `~/Library/LaunchAgents/` y lo carga (arranca al iniciar sesion, `KeepAlive`). Log en `~/Library/Logs/streamdeck-agent.log`.
+- `uninstall.command`: descarga y borra el agente.
+- **Conflicto de puerto**: el agente y Chrome no pueden abrir el puerto a la vez. Para reconfigurar botones en la web, pausar el agente (`launchctl unload <plist>`), configurar, y reanudar (`launchctl load <plist>`).
+- Requiere `pyserial` (el installer lo instala si falta).
+
 ```bash
 # Compilar
 arduino-cli compile \

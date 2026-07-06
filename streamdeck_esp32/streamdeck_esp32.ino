@@ -16,6 +16,7 @@ BleKeyboard bleKb("StreamDeck", "BitsyTornillos", 100);
 // ─── Layout (pantalla 480x320 landscape) ───
 static const int SCREEN_W = 480;
 static const int SCREEN_H = 320;
+static const uint8_t SCREEN_ROT = 3;   // 1 o 3 = landscape (3 = girado 180)
 static const int SIDEBAR_W = 52;
 static const int GRID_W = SCREEN_W - SIDEBAR_W;   // 428
 static const int COLS = 4;
@@ -96,9 +97,9 @@ void loadConfig(){
   prefs.end();}
 
 // ─── Calibracion tactil ───
-void saveCalib(){prefs.begin("deck",false);prefs.putBytes("cal",touchCal,sizeof(touchCal));prefs.end();}
-bool loadCalib(){prefs.begin("deck",true);size_t n=prefs.getBytesLength("cal");bool ok=false;
-  if(n==sizeof(touchCal)){prefs.getBytes("cal",touchCal,sizeof(touchCal));ok=true;}
+void saveCalib(){prefs.begin("deck",false);prefs.putBytes("cal",touchCal,sizeof(touchCal));prefs.putUChar("crot",SCREEN_ROT);prefs.end();}
+bool loadCalib(){prefs.begin("deck",true);size_t n=prefs.getBytesLength("cal");uint8_t cr=prefs.getUChar("crot",255);bool ok=false;
+  if(n==sizeof(touchCal)&&cr==SCREEN_ROT){prefs.getBytes("cal",touchCal,sizeof(touchCal));ok=true;}  // recalibra si cambio la rotacion
   prefs.end();return ok;}
 
 void runCalibration(){
@@ -253,7 +254,7 @@ void drawButton(int idx,bool pressed){
     int sz=iconPixelSize[idx],ix=cx-sz/2;
     if(buttons[idx].showLabel){lcd.pushImage(ix,by+yOff+(BTN_H/2)-sz/2-8,sz,sz,iconData[idx]);lcd.setTextColor(TFT_WHITE);lcd.setTextDatum(middle_center);lcd.setFont(&fonts::Font2);lcd.drawString(buttons[idx].label,cx,by+yOff+BTN_H-16);}
     else lcd.pushImage(ix,by+yOff+(BTN_H-sz)/2,sz,sz,iconData[idx]);
-  }else if(buttons[idx].showLabel){lcd.setTextColor(TFT_WHITE);lcd.setTextDatum(middle_center);lcd.setFont(&fonts::Font4);lcd.drawString(buttons[idx].label,cx,by+yOff+BTN_H/2);}}
+  }else if(buttons[idx].showLabel){lcd.setTextColor(TFT_WHITE);lcd.setTextDatum(middle_center);lcd.setFont(&fonts::Font2);lcd.drawString(buttons[idx].label,cx,by+yOff+BTN_H/2);}}
 
 void drawAll(){lcd.fillScreen(TFT_BLACK);for(int i=0;i<PER_PAGE;i++)drawButton(curPage*PER_PAGE+i,false);drawSidebar();}
 int hitTest(int32_t tx,int32_t ty){if(tx>=SB_X)return-1;for(int i=0;i<PER_PAGE;i++){int g=curPage*PER_PAGE+i;int bx,by;getBtnRect(g,bx,by);if(tx>=bx&&tx<=bx+BTN_W&&ty>=by&&ty<=by+BTN_H)return g;}return-1;}
@@ -368,7 +369,7 @@ void hideInfoScreen(){infoShown=false;drawAll();}
 void setup(){
   Serial.begin(115200);Serial.setRxBufferSize(16384);
   delay(500);Serial.println("[BOOT] Starting...");
-  lcd.init();lcd.setRotation(1);   // landscape 480x320
+  lcd.init();lcd.setRotation(SCREEN_ROT);   // landscape 480x320
   lcd.setSwapBytes(true);          // iconos: la web manda RGB565 big-endian
   for(int i=0;i<NUM_BUTTONS;i++){iconData[i]=NULL;hasIcon[i]=false;iconPixelSize[i]=32;buttons[i].action[0]='\0';buttons[i].actionType=0;}
   loadConfig();lcd.setBrightness(brightness);
